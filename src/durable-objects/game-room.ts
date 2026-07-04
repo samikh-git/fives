@@ -1,13 +1,15 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../index";
 import {
+  MAX_CAPTAIN_NAME_LENGTH,
+  MAX_CHAT_MESSAGE_LENGTH,
   MIN_BID_INCREMENT,
   POOL_SIZE,
   SQUAD_SIZE,
   STARTING_BUDGET,
 } from "../shared/constants";
 import { computeMaxLegalBid, isLegalBid } from "../shared/rules";
-import { sanitizeChatText } from "../shared/sanitize";
+import { sanitizeText } from "../shared/sanitize";
 import { containsProfanity } from "../shared/moderation";
 import type {
   Captain,
@@ -18,12 +20,23 @@ import type {
   RoundState,
   SquadEntry,
 } from "../shared/types";
+import { PING_PAYLOAD, PONG_PAYLOAD } from "../shared/protocol";
 import type { ChatEntry, ClientMessage, ErrorCode } from "../shared/protocol";
 
 /** Chat history is capped per game to bound the size of the persisted state blob. */
 const MAX_CHAT_HISTORY = 200;
-/** Matches the frontend's input maxLength; enforced server-side too since the DO is authoritative. */
-const MAX_CHAT_MESSAGE_LENGTH = 500;
+
+/**
+ * Cleans a captain-supplied display name: strips markup/control characters, enforces
+ * the max length, and drops names that are empty or flagged as profane (falling back
+ * to the default "Captain A/B" label) rather than rejecting the connection outright -
+ * there's no client round-trip to surface an error to at WebSocket-upgrade time.
+ */
+function sanitizeCaptainName(raw: string): string | null {
+  const cleaned = sanitizeText(raw).trim().slice(0, MAX_CAPTAIN_NAME_LENGTH);
+  if (!cleaned || containsProfanity(cleaned)) return null;
+  return cleaned;
+}
 
 /**
  * Result of a state-mutating action. Actions report illegal moves by returning
@@ -127,6 +140,9 @@ export class GameRoom extends DurableObject<Env> {
     this.ctx.storage.sql.exec(
       "CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY CHECK (id = 0), data TEXT NOT NULL)",
     );
+    // Client heartbeat pings are answered by the platform directly, without
+    // waking this (possibly hibernated) DO or reaching webSocketMessage.
+    this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING_PAYLOAD, PONG_PAYLOAD));
   }
 
   // ---- persistence ----
@@ -215,7 +231,8 @@ export class GameRoom extends DurableObject<Env> {
   /** Sets a captain's display name, shown in place of "Captain A/B" once populated. */
   async setCaptainName(captain: Captain, name: string): Promise<GameState> {
     const state = this.requireState();
-    state.captainNames[captain] = name;
+    const cleaned = sanitizeCaptainName(name);
+    if (cleaned) state.captainNames[captain] = cleaned;
     this.saveState(state);
     return toPublicState(state);
   }
@@ -370,7 +387,7 @@ export class GameRoom extends DurableObject<Env> {
 
   async sendChatMessage(captain: Captain, text: string): Promise<ActionResult<ChatEntry>> {
     const state = this.requireState();
-    const trimmed = sanitizeChatText(text).trim();
+    const trimmed = sanitizeText(text).trim().slice(0, MAX_CHAT_MESSAGE_LENGTH);
     if (!trimmed) {
       return err("EMPTY_CHAT_MESSAGE", "Chat message cannot be empty");
     }
@@ -381,7 +398,7 @@ export class GameRoom extends DurableObject<Env> {
     const entry: ChatEntry = {
       id: crypto.randomUUID(),
       captain,
-      text: trimmed.slice(0, MAX_CHAT_MESSAGE_LENGTH),
+      text: trimmed,
       ts: Date.now(),
     };
 
@@ -426,7 +443,8 @@ export class GameRoom extends DurableObject<Env> {
 
     const url = new URL(request.url);
     const token = url.searchParams.get("token") ?? "";
-    const name = url.searchParams.get("name")?.trim() || null;
+    const rawName = url.searchParams.get("name");
+    const name = rawName ? sanitizeCaptainName(rawName) : null;
     const state = this.loadState();
     if (!state) {
       return new Response("game not initialized", { status: 404 });

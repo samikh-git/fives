@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { env } from "cloudflare:test";
 import schema from "./schema.sql?raw";
-import { createPlayer, listPlayers, getPlayerById, updatePlayer, archivePlayer } from "./queries";
+import { createPlayer, listPlayers, countPlayers, getPlayerById, updatePlayer, archivePlayer } from "./queries";
 
 declare module "cloudflare:test" {
   interface ProvidedEnv {
@@ -69,5 +69,22 @@ describe("player queries", () => {
   it("getPlayerById returns null for an unknown id", async () => {
     const fetched = await getPlayerById(env.DB, "does-not-exist");
     expect(fetched).toBeNull();
+  });
+
+  it("listPlayers pages results with limit/offset, ordered by creation", async () => {
+    const created = [];
+    for (let i = 0; i < 5; i++) {
+      created.push(await createPlayer(env.DB, { name: `Page Player ${i}`, position: "MID" }));
+    }
+
+    const firstPage = await listPlayers(env.DB, { limit: 2, offset: 0 });
+    const secondPage = await listPlayers(env.DB, { limit: 2, offset: 2 });
+
+    expect(firstPage).toHaveLength(2);
+    expect(secondPage).toHaveLength(2);
+    expect(firstPage.map((p) => p.id)).not.toEqual(secondPage.map((p) => p.id));
+
+    const total = await countPlayers(env.DB);
+    expect(total).toBeGreaterThanOrEqual(created.length);
   });
 });

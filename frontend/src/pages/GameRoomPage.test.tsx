@@ -42,11 +42,13 @@ beforeEach(() => {
   mockedUseGameSocket.mockReturnValue({
     state: null,
     error: null,
+    connected: true,
     proposeNextPlayer: vi.fn(),
     placeBid: vi.fn(),
     pass: vi.fn(),
     chatMessages: [],
     sendChat: vi.fn(),
+    dismissError: vi.fn(),
   });
 });
 
@@ -62,11 +64,13 @@ describe("GameRoomPage", () => {
     mockedUseGameSocket.mockReturnValue({
       state: { ...baseState, phase: "waiting_for_captain_b" },
       error: null,
+      connected: true,
       proposeNextPlayer: vi.fn(),
       placeBid: vi.fn(),
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      dismissError: vi.fn(),
     });
 
     renderPage();
@@ -84,11 +88,13 @@ describe("GameRoomPage", () => {
     mockedUseGameSocket.mockReturnValue({
       state: { ...baseState, phase: "waiting_for_captain_b" },
       error: null,
+      connected: true,
       proposeNextPlayer: vi.fn(),
       placeBid: vi.fn(),
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      dismissError: vi.fn(),
     });
 
     renderPage();
@@ -120,11 +126,13 @@ describe("GameRoomPage", () => {
         },
       },
       error: null,
+      connected: true,
       proposeNextPlayer: vi.fn(),
       placeBid: vi.fn(),
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      dismissError: vi.fn(),
     });
 
     renderPage();
@@ -157,11 +165,13 @@ describe("GameRoomPage", () => {
         },
       },
       error: null,
+      connected: true,
       proposeNextPlayer: vi.fn(),
       placeBid: vi.fn(),
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      dismissError: vi.fn(),
     });
 
     renderPage();

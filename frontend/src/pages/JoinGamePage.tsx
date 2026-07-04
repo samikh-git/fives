@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { saveCaptainSession } from "../lib/session";
+import { MAX_CAPTAIN_NAME_LENGTH } from "../../../src/shared/constants";
 
 export function JoinGamePage() {
   const { gameId } = useParams<{ gameId: string }>();
@@ -33,6 +34,7 @@ export function JoinGamePage() {
           placeholder="Captain B"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          maxLength={MAX_CAPTAIN_NAME_LENGTH}
         />
       </div>
       <button className="btn btn--primary" type="button" onClick={handleJoin}>

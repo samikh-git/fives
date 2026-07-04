@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useParams } from "react-router-dom";
-import { Copy, Check } from "@phosphor-icons/react";
+import { Copy, Check, ShareNetwork } from "@phosphor-icons/react";
 import { getCaptainSession } from "../lib/session";
 import { useGameSocket } from "../hooks/useGameSocket";
 import { computeMaxLegalBid } from "../../../src/shared/rules";
@@ -24,10 +24,22 @@ export function GameRoomPage() {
     setTimeout(() => setLinkCopied(false), 2000);
   }
 
+  async function shareJoinLink(url: string) {
+    if (navigator.share) {
+      try {
+        await navigator.share({ url, title: "Join my Fives draft" });
+      } catch {
+        // user cancelled the share sheet — nothing to do
+      }
+    } else {
+      await copyJoinLink(url);
+    }
+  }
+
   // Hooks must run unconditionally; useGameSocket no-ops (stays disconnected)
   // when gameId/token are null, which is the case whenever there's no valid
   // session for this game.
-  const { state, error, chatMessages, placeBid, pass, proposeNextPlayer, sendChat } = useGameSocket(
+  const { state, error, chatMessages, connected, placeBid, pass, proposeNextPlayer, sendChat, dismissError } = useGameSocket(
     session && gameId ? gameId : null,
     session ? session.token : null,
     session?.name ?? null,
@@ -84,12 +96,24 @@ export function GameRoomPage() {
               >
                 {linkCopied ? <Check weight="bold" /> : <Copy weight="bold" />}
               </button>
+              <button
+                className="btn btn--icon lobby-card__share-btn"
+                type="button"
+                aria-label="Share link"
+                title="Share link"
+                onClick={() => void shareJoinLink(session.joinUrlForB!)}
+              >
+                <ShareNetwork weight="bold" />
+              </button>
             </div>
           </div>
         )}
         {error && (
           <p className="alert" role="alert">
             {error.message}
+            <button type="button" className="alert__dismiss" aria-label="Dismiss" onClick={dismissError}>
+              &times;
+            </button>
           </p>
         )}
       </div>
@@ -115,6 +139,9 @@ export function GameRoomPage() {
         {error && (
           <p className="alert" role="alert">
             {error.message}
+            <button type="button" className="alert__dismiss" aria-label="Dismiss" onClick={dismissError}>
+              &times;
+            </button>
           </p>
         )}
 
@@ -196,6 +223,11 @@ export function GameRoomPage() {
 
   return (
     <>
+      {!connected && (
+        <p className="alert alert--reconnecting" role="status">
+          Reconnecting...
+        </p>
+      )}
       {content}
       <ChatModal
         myCaptain={myCaptain}

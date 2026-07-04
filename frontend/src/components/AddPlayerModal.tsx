@@ -13,6 +13,8 @@ interface AddPlayerModalProps {
 export function AddPlayerModal({ onClose, onCreated }: AddPlayerModalProps) {
   const [name, setName] = useState("");
   const [position, setPosition] = useState<Position>("GK");
+  const [club, setClub] = useState("");
+  const [nation, setNation] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +41,13 @@ export function AddPlayerModal({ onClose, onCreated }: AddPlayerModalProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await playersApi.createPlayer({ name, position, imageUrl: imageUrl || null });
+      await playersApi.createPlayer({
+        name,
+        position,
+        club: club.trim() || null,
+        nation: nation.trim() || null,
+        imageUrl: imageUrl || null,
+      });
       onCreated();
       onClose();
     } catch (err) {
@@ -68,6 +76,12 @@ export function AddPlayerModal({ onClose, onCreated }: AddPlayerModalProps) {
             </option>
           ))}
         </select>
+
+        <label htmlFor="new-player-club">Team</label>
+        <input id="new-player-club" value={club} onChange={(e) => setClub(e.target.value)} />
+
+        <label htmlFor="new-player-nation">Nationality</label>
+        <input id="new-player-nation" value={nation} onChange={(e) => setNation(e.target.value)} />
 
         <label htmlFor="new-player-image-url">Image URL</label>
         <input

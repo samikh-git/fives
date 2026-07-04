@@ -175,17 +175,56 @@ describe("useGameSocket", () => {
     expect(JSON.parse(socket.sent[0]!)).toEqual({ type: "send_chat", text: "gg" });
   });
 
-  it("reconnects once when the socket closes", async () => {
-    renderHook(() => useGameSocket("game-1", "token-1"));
+  it("keeps reconnecting with backoff across repeated closes, not just once", async () => {
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useGameSocket("game-1", "token-1"));
+      expect(FakeWebSocket.instances).toHaveLength(1);
 
-    expect(FakeWebSocket.instances).toHaveLength(1);
+      // First drop: retries after the initial backoff delay.
+      act(() => {
+        FakeWebSocket.instances[0]!.triggerClose();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(2);
+
+      // Second drop in a row used to be where the old policy gave up for good.
+      act(() => {
+        FakeWebSocket.instances[1]!.triggerClose();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(3);
+
+      // A third drop still reconnects rather than going silent.
+      act(() => {
+        FakeWebSocket.instances[2]!.triggerClose();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      expect(FakeWebSocket.instances).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reflects connected state through open/close cycles", async () => {
+    const { result } = renderHook(() => useGameSocket("game-1", "token-1"));
+
+    expect(result.current.connected).toBe(false);
+
+    act(() => {
+      FakeWebSocket.instances[0]!.triggerOpen();
+    });
+    await waitFor(() => expect(result.current.connected).toBe(true));
 
     act(() => {
       FakeWebSocket.instances[0]!.triggerClose();
     });
-
-    await waitFor(() => {
-      expect(FakeWebSocket.instances).toHaveLength(2);
-    });
+    await waitFor(() => expect(result.current.connected).toBe(false));
   });
 });

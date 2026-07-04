@@ -52,16 +52,71 @@ export const gamesRouter = new Hono<{ Bindings: Env }>();
 
 interface CreateGameBody {
   selectedPlayerIds?: unknown;
+  filters?: unknown;
+}
+
+interface PoolFilters {
+  leagues?: string[];
+  clubs?: string[];
+  nations?: string[];
+}
+
+const FILTER_KEYS = ["leagues", "clubs", "nations"] as const;
+
+function parseFilters(input: unknown): { ok: true; filters: PoolFilters } | { ok: false; error: string } {
+  if (input === undefined) {
+    return { ok: true, filters: {} };
+  }
+  if (typeof input !== "object" || input === null) {
+    return { ok: false, error: "filters must be an object" };
+  }
+
+  const raw = input as Record<string, unknown>;
+  const filters: PoolFilters = {};
+  for (const key of FILTER_KEYS) {
+    const value = raw[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || !value.every((v) => typeof v === "string")) {
+      return { ok: false, error: `filters.${key} must be an array of strings` };
+    }
+    if (value.length > 0) {
+      filters[key] = value;
+    }
+  }
+  return { ok: true, filters };
+}
+
+/** Builds an ` AND league IN (?,?) AND club IN (...) ...` suffix (AND across facets, OR within one). */
+function filterClause(filters: PoolFilters): { clause: string; params: string[] } {
+  const columnByKey: Record<(typeof FILTER_KEYS)[number], string> = {
+    leagues: "league",
+    clubs: "club",
+    nations: "nation",
+  };
+
+  const parts: string[] = [];
+  const params: string[] = [];
+  for (const key of FILTER_KEYS) {
+    const values = filters[key];
+    if (values && values.length > 0) {
+      parts.push(`${columnByKey[key]} IN (${values.map(() => "?").join(",")})`);
+      params.push(...values);
+    }
+  }
+  return { clause: parts.length > 0 ? ` AND ${parts.join(" AND ")}` : "", params };
 }
 
 /**
  * Picks the 10-player pool. When `selectedPlayerIds` is given (a captain hand-picked the
  * pool), it's used verbatim after validation, then shuffled for proposal order — same
- * shuffle-for-order behavior as the random draw, just skipping the draw itself.
+ * shuffle-for-order behavior as the random draw, just skipping the draw itself. `filters`
+ * (league/club/nation) only narrows the candidate set for the random draw; they're ignored
+ * for a hand-picked pool since the frontend already applies them before the captain picks.
  */
 async function resolvePool(
   db: D1Database,
   selectedPlayerIds: unknown,
+  filters: PoolFilters,
 ): Promise<{ ok: true; pool: PlayerRow[] } | { ok: false; error: string }> {
   if (selectedPlayerIds !== undefined) {
     if (!Array.isArray(selectedPlayerIds) || !selectedPlayerIds.every((id) => typeof id === "string")) {
@@ -93,18 +148,31 @@ async function resolvePool(
     return { ok: true, pool: shuffle(rows) };
   }
 
+  const { clause, params } = filterClause(filters);
+  const hasFilters = clause.length > 0;
   const { results: rows } = await db
-    .prepare("SELECT id, name, position, club, nation, image_url FROM players WHERE archived_at IS NULL")
+    .prepare(`SELECT id, name, position, club, nation, image_url FROM players WHERE archived_at IS NULL${clause}`)
+    .bind(...params)
     .all<PlayerRow>();
 
   if (rows.length < POOL_SIZE) {
-    return { ok: false, error: `Roster must contain at least ${POOL_SIZE} players` };
+    return {
+      ok: false,
+      error: hasFilters
+        ? `Fewer than ${POOL_SIZE} players match the selected filters`
+        : `Roster must contain at least ${POOL_SIZE} players`,
+    };
   }
 
   const goalies = rows.filter((p) => p.position === "GK");
   const others = rows.filter((p) => p.position !== "GK");
   if (goalies.length < MIN_GOALIES_IN_POOL) {
-    return { ok: false, error: `Roster must contain at least ${MIN_GOALIES_IN_POOL} goalkeepers` };
+    return {
+      ok: false,
+      error: hasFilters
+        ? `Fewer than ${MIN_GOALIES_IN_POOL} goalkeepers match the selected filters`
+        : `Roster must contain at least ${MIN_GOALIES_IN_POOL} goalkeepers`,
+    };
   }
 
   const shuffledGoalies = shuffle(goalies);
@@ -116,9 +184,20 @@ async function resolvePool(
 }
 
 gamesRouter.post("/", async (c) => {
+  const clientIp = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const { success } = await c.env.CREATE_GAME_RATE_LIMITER.limit({ key: clientIp });
+  if (!success) {
+    return c.json({ error: "Too many games created recently. Please try again later." }, 429);
+  }
+
   const body = await c.req.json<CreateGameBody>().catch((): CreateGameBody => ({}));
 
-  const poolResult = await resolvePool(c.env.DB, body.selectedPlayerIds);
+  const filtersResult = parseFilters(body.filters);
+  if (!filtersResult.ok) {
+    return c.json({ error: filtersResult.error }, 400);
+  }
+
+  const poolResult = await resolvePool(c.env.DB, body.selectedPlayerIds, filtersResult.filters);
   if (!poolResult.ok) {
     return c.json({ error: poolResult.error }, 400);
   }

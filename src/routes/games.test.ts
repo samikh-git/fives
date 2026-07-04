@@ -10,6 +10,7 @@ declare module "cloudflare:test" {
   interface ProvidedEnv {
     DB: D1Database;
     GAME_ROOM: DurableObjectNamespace<GameRoom>;
+    CREATE_GAME_RATE_LIMITER: RateLimit;
   }
 }
 
@@ -22,6 +23,24 @@ beforeAll(async () => {
     await env.DB.prepare(statement).run();
   }
 });
+
+// The create-game rate limiter is keyed by CF-Connecting-IP; give each POST its own
+// IP so tests exercising pool/validation logic don't trip the unrelated rate limit
+// (which is exercised deliberately in its own test below).
+let ipCounter = 0;
+function freshIp(): string {
+  ipCounter += 1;
+  return `10.0.0.${ipCounter}`;
+}
+
+async function postCreateGame(body?: unknown, ip: string = freshIp()): Promise<Response> {
+  const init: RequestInit = { method: "POST", headers: { "CF-Connecting-IP": ip } };
+  if (body !== undefined) {
+    init.headers = { ...init.headers, "Content-Type": "application/json" };
+    init.body = JSON.stringify(body);
+  }
+  return gamesRouter.request("/", init, env);
+}
 
 async function seedPlayers(prefix: string, positions: Position[]): Promise<string[]> {
   const ids: string[] = [];
@@ -37,6 +56,24 @@ async function seedPlayers(prefix: string, positions: Position[]): Promise<strin
   return ids;
 }
 
+async function seedPlayersWithLeague(
+  prefix: string,
+  entries: { position: Position; league: string }[],
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const id = `${prefix}-${i}`;
+    const entry = entries[i]!;
+    await env.DB.prepare(
+      "INSERT INTO players (id, name, position, league, created_at) VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(id, `${prefix} Player ${i}`, entry.position, entry.league, Date.now())
+      .run();
+    ids.push(id);
+  }
+  return ids;
+}
+
 describe("POST /games", () => {
   it("rejects when the roster has fewer than MIN_GOALIES_IN_POOL goalkeepers", async () => {
     await seedPlayers(
@@ -44,7 +81,7 @@ describe("POST /games", () => {
       ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"],
     );
 
-    const res = await gamesRouter.request("/", { method: "POST" }, env);
+    const res = await postCreateGame();
 
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
@@ -54,7 +91,7 @@ describe("POST /games", () => {
   it("rejects when the roster has fewer than POOL_SIZE players", async () => {
     await seedPlayers("toofew", ["GK", "GK", "DEF"]);
 
-    const res = await gamesRouter.request("/", { method: "POST" }, env);
+    const res = await postCreateGame();
 
     expect(res.status).toBe(400);
   });
@@ -65,7 +102,7 @@ describe("POST /games", () => {
       ["GK", "GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
     );
 
-    const res = await gamesRouter.request("/", { method: "POST" }, env);
+    const res = await postCreateGame();
 
     expect(res.status).toBe(201);
     const body = await res.json<{ gameId: string; captainAToken: string; joinUrlForB: string }>();
@@ -113,7 +150,7 @@ describe("POST /games", () => {
 
     const poolIdSets: Set<string>[] = [];
     for (let i = 0; i < 5; i++) {
-      const res = await gamesRouter.request("/", { method: "POST" }, env);
+      const res = await postCreateGame();
       expect(res.status).toBe(201);
       const { gameId } = await res.json<{ gameId: string }>();
       const poolRows = await env.DB.prepare("SELECT player_id FROM game_pool WHERE game_id = ?")
@@ -135,15 +172,7 @@ describe("POST /games", () => {
     );
     const chosen = ids.slice(0, 10);
 
-    const res = await gamesRouter.request(
-      "/",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selectedPlayerIds: chosen }),
-      },
-      env,
-    );
+    const res = await postCreateGame({ selectedPlayerIds: chosen });
 
     expect(res.status).toBe(201);
     const { gameId } = await res.json<{ gameId: string }>();
@@ -160,15 +189,7 @@ describe("POST /games", () => {
       ["GK", "GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
     );
 
-    const res = await gamesRouter.request(
-      "/",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selectedPlayerIds: ids.slice(0, 9) }),
-      },
-      env,
-    );
+    const res = await postCreateGame({ selectedPlayerIds: ids.slice(0, 9) });
 
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
@@ -181,19 +202,31 @@ describe("POST /games", () => {
       ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
     );
 
-    const res = await gamesRouter.request(
-      "/",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selectedPlayerIds: ids }),
-      },
-      env,
-    );
+    const res = await postCreateGame({ selectedPlayerIds: ids });
 
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
     expect(body.error).toMatch(/goalkeeper/i);
+  });
+
+  it("rate-limits repeated game creation from the same client", async () => {
+    await seedPlayers(
+      "ratelimited",
+      ["GK", "GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
+    );
+
+    const clientIp = "203.0.113.5";
+
+    for (let i = 0; i < 5; i++) {
+      const res = await postCreateGame(undefined, clientIp);
+      expect(res.status).toBe(201);
+    }
+
+    const blocked = await postCreateGame(undefined, clientIp);
+    expect(blocked.status).toBe(429);
+
+    const otherClient = await postCreateGame(undefined, "203.0.113.9");
+    expect(otherClient.status).toBe(201);
   });
 
   it("rejects selectedPlayerIds referencing an archived or unknown player", async () => {
@@ -205,19 +238,63 @@ describe("POST /games", () => {
       .bind(Date.now(), ids[0])
       .run();
 
-    const res = await gamesRouter.request(
-      "/",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selectedPlayerIds: ids }),
-      },
-      env,
-    );
+    const res = await postCreateGame({ selectedPlayerIds: ids });
 
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
     expect(body.error).toMatch(/could not be found/i);
+  });
+
+  it("restricts the random draw to players matching the given league filter", async () => {
+    const premIds = await seedPlayersWithLeague("premfilter", [
+      { position: "GK", league: "Premier League" },
+      { position: "GK", league: "Premier League" },
+      { position: "DEF", league: "Premier League" },
+      { position: "DEF", league: "Premier League" },
+      { position: "DEF", league: "Premier League" },
+      { position: "MID", league: "Premier League" },
+      { position: "MID", league: "Premier League" },
+      { position: "MID", league: "Premier League" },
+      { position: "ATT", league: "Premier League" },
+      { position: "ATT", league: "Premier League" },
+    ]);
+    await seedPlayersWithLeague("ligafilter", [
+      { position: "GK", league: "La Liga" },
+      { position: "GK", league: "La Liga" },
+      { position: "DEF", league: "La Liga" },
+    ]);
+
+    const res = await postCreateGame({ filters: { leagues: ["Premier League"] } });
+
+    expect(res.status).toBe(201);
+    const { gameId } = await res.json<{ gameId: string }>();
+
+    const poolRows = await env.DB.prepare("SELECT player_id FROM game_pool WHERE game_id = ?")
+      .bind(gameId)
+      .all<{ player_id: string }>();
+    expect(new Set(poolRows.results.map((r) => r.player_id))).toEqual(new Set(premIds));
+  });
+
+  it("rejects when fewer than POOL_SIZE players match the given filters", async () => {
+    await seedPlayersWithLeague("toofewfilter", [
+      { position: "GK", league: "La Liga" },
+      { position: "GK", league: "La Liga" },
+      { position: "DEF", league: "La Liga" },
+    ]);
+
+    const res = await postCreateGame({ filters: { leagues: ["La Liga"] } });
+
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toMatch(/filters/i);
+  });
+
+  it("rejects a non-array filters value", async () => {
+    const res = await postCreateGame({ filters: { leagues: "Premier League" } });
+
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toMatch(/leagues must be an array/i);
   });
 });
 
@@ -228,7 +305,7 @@ describe("GET /games/:id", () => {
       ["GK", "GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
     );
 
-    const createRes = await gamesRouter.request("/", { method: "POST" }, env);
+    const createRes = await postCreateGame();
     const { gameId } = await createRes.json<{ gameId: string }>();
 
     const res = await gamesRouter.request(`/${gameId}`, {}, env);
@@ -249,7 +326,7 @@ describe("GET /games/:id", () => {
       ["GK", "GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
     );
 
-    const createRes = await gamesRouter.request("/", { method: "POST" }, env);
+    const createRes = await postCreateGame();
     const { gameId } = await createRes.json<{ gameId: string }>();
 
     // Drive the DO directly to completion (bypassing WebSocket) rather than

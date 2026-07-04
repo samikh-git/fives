@@ -97,6 +97,33 @@ describe("GameRoom.setCaptainName", () => {
     const state2 = await stub.setCaptainName("B", "Alex");
     expect(state2.captainNames).toEqual({ A: "Jamie", B: "Alex" });
   });
+
+  it("strips markup, trims, and truncates an overlong name", async () => {
+    const stub = freshStub();
+    await stub.init(makeInitParams());
+
+    const overlong = "<b>Jamie</b>" + " the Great".repeat(10);
+    const state = await stub.setCaptainName("A", overlong);
+    expect(state.captainNames.A).not.toBeNull();
+    expect(state.captainNames.A).not.toContain("<");
+    expect(state.captainNames.A!.length).toBeLessThanOrEqual(40);
+  });
+
+  it("ignores a profane name, leaving the captain unnamed", async () => {
+    const stub = freshStub();
+    await stub.init(makeInitParams());
+
+    const state = await stub.setCaptainName("A", "you are a bitch");
+    expect(state.captainNames.A).toBeNull();
+  });
+
+  it("ignores a blank/whitespace-only name", async () => {
+    const stub = freshStub();
+    await stub.init(makeInitParams());
+
+    const state = await stub.setCaptainName("A", "   ");
+    expect(state.captainNames.A).toBeNull();
+  });
 });
 
 describe("GameRoom.handleCaptainConnected", () => {

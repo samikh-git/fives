@@ -31,6 +31,15 @@ export type ClientMessage =
   | PassMessage
   | SendChatMessage;
 
+/**
+ * Fixed-string heartbeat payloads matched by the DO's `setWebSocketAutoResponse`
+ * pairing (see game-room.ts) - the platform replies to a matching ping frame
+ * without waking a hibernated DO, so these must stay exact string literals
+ * rather than ClientMessage/ServerMessage union members with variable fields.
+ */
+export const PING_PAYLOAD = '{"type":"ping"}';
+export const PONG_PAYLOAD = '{"type":"pong"}';
+
 /** One chat message, as stored by the DO and displayed by clients. */
 export interface ChatEntry {
   id: string;

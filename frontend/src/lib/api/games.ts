@@ -8,6 +8,17 @@ export interface CreateGameResponse {
   joinUrlForB: string;
 }
 
+export interface PoolFilters {
+  leagues?: string[];
+  clubs?: string[];
+  nations?: string[];
+}
+
+export interface CreateGameOptions {
+  selectedPlayerIds?: string[];
+  filters?: PoolFilters;
+}
+
 export interface GameResultEntry {
   playerId: string;
   name: string;
@@ -38,11 +49,12 @@ async function parseJsonResponse<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function createGame(selectedPlayerIds?: string[]): Promise<CreateGameResponse> {
+export async function createGame(options?: CreateGameOptions): Promise<CreateGameResponse> {
+  const hasBody = !!(options?.selectedPlayerIds || options?.filters);
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: selectedPlayerIds ? { "Content-Type": "application/json" } : undefined,
-    body: selectedPlayerIds ? JSON.stringify({ selectedPlayerIds }) : undefined,
+    headers: hasBody ? { "Content-Type": "application/json" } : undefined,
+    body: hasBody ? JSON.stringify(options) : undefined,
   });
   return parseJsonResponse<CreateGameResponse>(res);
 }

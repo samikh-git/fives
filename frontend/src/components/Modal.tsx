@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps {
   title: string;
@@ -15,7 +16,12 @@ export function Modal({ title, onClose, children }: ModalProps) {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  return (
+  // Rendered via a portal straight onto <body>: the page shell (.stadium__screen) uses
+  // backdrop-filter, which makes it the containing block for any `position: fixed`
+  // descendant. Left inline, this modal would centre itself against the shell's full
+  // (potentially very tall, scrolled-past) content height instead of the viewport -
+  // on a long roster page that meant the dialog could render off-screen.
+  return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="modal__head">
@@ -26,6 +32,7 @@ export function Modal({ title, onClose, children }: ModalProps) {
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

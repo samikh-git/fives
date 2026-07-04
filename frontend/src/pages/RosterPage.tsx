@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Player, Position } from "../../../src/shared/types";
+import { ROSTER_PAGE_SIZE } from "../../../src/shared/constants";
 import * as playersApi from "../lib/api/players";
 import { AddPlayerModal } from "../components/AddPlayerModal";
 
@@ -7,6 +8,8 @@ const POSITIONS: Position[] = ["GK", "DEF", "MID", "ATT"];
 
 export function RosterPage() {
   const [players, setPlayers] = useState<Player[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,11 +19,17 @@ export function RosterPage() {
   const [editName, setEditName] = useState("");
   const [editPosition, setEditPosition] = useState<Position>("GK");
 
-  const refresh = useCallback(async () => {
+  const pageCount = Math.max(1, Math.ceil(total / ROSTER_PAGE_SIZE));
+
+  const refresh = useCallback(async (targetPage: number) => {
     setLoading(true);
     try {
-      const data = await playersApi.listPlayers();
-      setPlayers(data);
+      const data = await playersApi.listPlayers({
+        limit: ROSTER_PAGE_SIZE,
+        offset: targetPage * ROSTER_PAGE_SIZE,
+      });
+      setPlayers(data.players);
+      setTotal(data.total);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load roster");
@@ -30,8 +39,16 @@ export function RosterPage() {
   }, []);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refresh(page);
+  }, [refresh, page]);
+
+  // If an archive/delete empties the current (non-first) page, step back a page
+  // rather than showing a page with nothing on it.
+  useEffect(() => {
+    if (!loading && players.length === 0 && page > 0) {
+      setPage((p) => p - 1);
+    }
+  }, [loading, players.length, page]);
 
   function startEdit(player: Player) {
     setEditingId(player.id);
@@ -43,7 +60,7 @@ export function RosterPage() {
     try {
       await playersApi.updatePlayer(id, { name: editName, position: editPosition });
       setEditingId(null);
-      await refresh();
+      await refresh(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update player");
     }
@@ -52,7 +69,7 @@ export function RosterPage() {
   async function handleArchive(id: string) {
     try {
       await playersApi.archivePlayer(id);
-      await refresh();
+      await refresh(page);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to archive player");
     }
@@ -63,7 +80,7 @@ export function RosterPage() {
       <div className="roster-page__head">
         <h1>Player Roster</h1>
         <div className="roster-page__head-actions">
-          <span className="status-line">{players.length} in the pool</span>
+          <span className="status-line">{total} in the pool</span>
           <button className="btn btn--primary" type="button" onClick={() => setShowAddModal(true)}>
             Add Player
           </button>
@@ -71,7 +88,7 @@ export function RosterPage() {
       </div>
 
       {showAddModal && (
-        <AddPlayerModal onClose={() => setShowAddModal(false)} onCreated={() => void refresh()} />
+        <AddPlayerModal onClose={() => setShowAddModal(false)} onCreated={() => void refresh(page)} />
       )}
 
       {error && (
@@ -83,6 +100,7 @@ export function RosterPage() {
       {loading ? (
         <p className="status-line">Loading...</p>
       ) : (
+        <div className="roster-table-wrapper">
         <table className="roster-table">
           <thead>
             <tr>
@@ -172,6 +190,31 @@ export function RosterPage() {
             )}
           </tbody>
         </table>
+        </div>
+      )}
+
+      {!loading && total > 0 && (
+        <div className="roster-pagination">
+          <button
+            className="btn btn--small btn--ghost"
+            type="button"
+            disabled={page === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            Previous
+          </button>
+          <span className="status-line">
+            Page {page + 1} of {pageCount}
+          </span>
+          <button
+            className="btn btn--small btn--ghost"
+            type="button"
+            disabled={page >= pageCount - 1}
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+          >
+            Next
+          </button>
+        </div>
       )}
     </div>
   );

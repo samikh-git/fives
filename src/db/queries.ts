@@ -125,14 +125,30 @@ export async function upsertPlayerByExternalId(
 
 export async function listPlayers(
   db: D1Database,
-  options?: { includeArchived?: boolean },
+  options?: { includeArchived?: boolean; limit?: number; offset?: number },
 ): Promise<Player[]> {
-  const query = options?.includeArchived
-    ? "SELECT * FROM players ORDER BY created_at ASC"
-    : "SELECT * FROM players WHERE archived_at IS NULL ORDER BY created_at ASC";
+  const whereClause = options?.includeArchived ? "" : " WHERE archived_at IS NULL";
+  let query = `SELECT * FROM players${whereClause} ORDER BY created_at ASC`;
 
-  const { results } = await db.prepare(query).all<PlayerRow>();
+  const params: number[] = [];
+  if (options?.limit !== undefined) {
+    query += " LIMIT ? OFFSET ?";
+    params.push(options.limit, options.offset ?? 0);
+  }
+
+  const stmt = db.prepare(query);
+  const { results } = await (params.length > 0 ? stmt.bind(...params) : stmt).all<PlayerRow>();
   return results.map(rowToPlayer);
+}
+
+/** Total count backing `listPlayers`' pagination, so callers know how many pages exist. */
+export async function countPlayers(
+  db: D1Database,
+  options?: { includeArchived?: boolean },
+): Promise<number> {
+  const whereClause = options?.includeArchived ? "" : " WHERE archived_at IS NULL";
+  const row = await db.prepare(`SELECT COUNT(*) as count FROM players${whereClause}`).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 export async function getPlayerById(db: D1Database, id: string): Promise<Player | null> {

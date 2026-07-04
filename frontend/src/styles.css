@@ -420,6 +420,28 @@ select {
   border-radius: var(--radius-chip);
   margin-bottom: 1.25rem;
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.alert--reconnecting {
+  background: rgba(240, 180, 41, 0.12);
+  border-color: rgba(240, 180, 41, 0.5);
+  color: #f0d29a;
+  justify-content: center;
+}
+
+.alert__dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  flex-shrink: 0;
 }
 
 /* ---------------------------------- roster page ------------------------ */
@@ -443,10 +465,22 @@ select {
   gap: 1.25rem;
 }
 
+.roster-table-wrapper {
+  overflow-x: auto;
+  margin-bottom: 1.5rem;
+}
+
 .roster-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.95rem;
+}
+
+.roster-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
   margin-bottom: 2.5rem;
 }
 
@@ -688,6 +722,47 @@ select {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
+}
+
+.create-game__filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.create-game__filters-hint {
+  font-size: 0.8rem;
+}
+
+.create-game__filter-fields {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.create-game__filter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 12rem;
+  flex: 1 1 12rem;
+}
+
+.create-game__filter label {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--line-chalk-dim);
+}
+
+.create-game__filter select {
+  background: var(--pitch-900);
+  border: 1px solid var(--pitch-700);
+  color: var(--line-chalk);
+  border-radius: var(--radius-chip);
+  padding: 0.35rem;
+  font-size: 0.85rem;
 }
 
 .create-game__player-picker {
@@ -1042,8 +1117,8 @@ select {
 }
 
 .bid-controls__stepper button {
-  width: 2rem;
-  height: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: 50%;
   border: 1px solid var(--pitch-700);
   background: var(--pitch-800);
@@ -1161,6 +1236,16 @@ select {
   font-size: 0.85rem;
 }
 
+.lobby-card__share-btn {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .lobby-card__share-btn {
+    display: inline-flex;
+  }
+}
+
 /* ---------------------------------- results / full-time ------------------ */
 
 .fulltime {
@@ -1244,6 +1329,9 @@ select {
   cursor: pointer;
   display: flex;
   align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
 }
 
 .chat-toggle:hover {
@@ -1325,7 +1413,11 @@ select {
   color: var(--line-chalk-dim);
   cursor: pointer;
   display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.25rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
 }
 
 .chat-modal__close:hover {

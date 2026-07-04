@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { CreateGamePage } from "./CreateGamePage";
 import * as gamesApi from "../lib/api/games";
@@ -34,6 +34,10 @@ function makePlayers(): Player[] {
   return players;
 }
 
+function playersPage(players: Player[]): { players: Player[]; total: number } {
+  return { players, total: players.length };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
@@ -42,8 +46,15 @@ beforeEach(() => {
     captainAToken: "token-a",
     joinUrlForB: "https://example.com/game/game-1/join?t=token-b",
   });
-  mockedPlayersApi.listPlayers.mockResolvedValue(makePlayers());
+  mockedPlayersApi.listPlayers.mockResolvedValue(playersPage(makePlayers()));
 });
+
+function selectFacetOption(labelText: RegExp, optionName: string) {
+  const select = screen.getByLabelText(labelText);
+  const option = within(select).getByRole("option", { name: optionName });
+  (option as unknown as HTMLOptionElement).selected = true;
+  fireEvent.change(select);
+}
 
 function renderPage() {
   return render(
@@ -65,7 +76,7 @@ describe("CreateGamePage", () => {
     await waitFor(() => {
       expect(mockedGamesApi.createGame).toHaveBeenCalledTimes(1);
     });
-    expect(mockedGamesApi.createGame).toHaveBeenCalledWith();
+    expect(mockedGamesApi.createGame).toHaveBeenCalledWith(undefined);
 
     await screen.findByText("Game room");
 
@@ -121,9 +132,86 @@ describe("CreateGamePage", () => {
     await waitFor(() => {
       expect(mockedGamesApi.createGame).toHaveBeenCalledTimes(1);
     });
-    const [selectedIds] = mockedGamesApi.createGame.mock.calls[0]!;
-    expect(new Set(selectedIds)).toEqual(
+    const [options] = mockedGamesApi.createGame.mock.calls[0]!;
+    expect(new Set(options?.selectedPlayerIds)).toEqual(
       new Set(["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "g1", "g2"]),
     );
+  });
+
+  it("restricts the random pool draw to the leagues selected in the filter menu", async () => {
+    mockedPlayersApi.listPlayers.mockResolvedValue(
+      playersPage([
+        {
+          id: "p1",
+          name: "Prem Player",
+          position: "MID",
+          club: null,
+          nation: null,
+          league: "Premier League",
+          imageUrl: null,
+          externalId: null,
+          archivedAt: null,
+        },
+        {
+          id: "p2",
+          name: "Liga Player",
+          position: "MID",
+          club: null,
+          nation: null,
+          league: "La Liga",
+          imageUrl: null,
+          externalId: null,
+          archivedAt: null,
+        },
+      ]),
+    );
+    renderPage();
+
+    await screen.findByLabelText(/^league$/i);
+    selectFacetOption(/^league$/i, "Premier League");
+
+    fireEvent.click(screen.getByRole("button", { name: /create game/i }));
+
+    await waitFor(() => {
+      expect(mockedGamesApi.createGame).toHaveBeenCalledWith({
+        filters: { leagues: ["Premier League"] },
+      });
+    });
+  });
+
+  it("groups the club filter options under their league as native optgroups", async () => {
+    mockedPlayersApi.listPlayers.mockResolvedValue(
+      playersPage([
+        {
+          id: "p1",
+          name: "Prem Player",
+          position: "MID",
+          club: "Arsenal",
+          nation: null,
+          league: "Premier League",
+          imageUrl: null,
+          externalId: null,
+          archivedAt: null,
+        },
+        {
+          id: "p2",
+          name: "Liga Player",
+          position: "MID",
+          club: "Barcelona",
+          nation: null,
+          league: "La Liga",
+          imageUrl: null,
+          externalId: null,
+          archivedAt: null,
+        },
+      ]),
+    );
+    renderPage();
+
+    const clubSelect = await screen.findByLabelText(/^club$/i);
+    const premGroup = within(clubSelect).getByRole("group", { name: "Premier League" });
+    const ligaGroup = within(clubSelect).getByRole("group", { name: "La Liga" });
+    expect(within(premGroup).getByRole("option", { name: "Arsenal" })).toBeInTheDocument();
+    expect(within(ligaGroup).getByRole("option", { name: "Barcelona" })).toBeInTheDocument();
   });
 });

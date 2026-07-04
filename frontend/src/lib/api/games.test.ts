@@ -37,12 +37,33 @@ describe("games api", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await createGame(["p1", "p2"]);
+    await createGame({ selectedPlayerIds: ["p1", "p2"] });
 
     expect(fetchMock).toHaveBeenCalledWith("/api/games", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selectedPlayerIds: ["p1", "p2"] }),
+    });
+  });
+
+  it("posts filters as a JSON body when creating a filtered random pool", async () => {
+    const responseBody = {
+      gameId: "game-1",
+      captainAToken: "token-a",
+      joinUrlForB: "https://example.com/game/game-1/join?t=token-b",
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(responseBody),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createGame({ filters: { leagues: ["Premier League"] } });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/games", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filters: { leagues: ["Premier League"] } }),
     });
   });
 

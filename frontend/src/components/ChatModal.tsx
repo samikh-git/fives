@@ -3,10 +3,9 @@ import type { FormEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChatCircleDots, X } from "@phosphor-icons/react";
 import { useChatToggleSlot } from "../lib/chatToggleSlot";
+import { MAX_CHAT_MESSAGE_LENGTH } from "../../../src/shared/constants";
 import type { Captain } from "../../../src/shared/types";
 import type { ChatEntry } from "../../../src/shared/protocol";
-
-const MAX_CHAT_MESSAGE_LENGTH = 500;
 
 export function ChatModal({
   myCaptain,
