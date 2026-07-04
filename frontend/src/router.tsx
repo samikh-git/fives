@@ -58,9 +58,6 @@ function AppShell({ children }: { children: ReactNode }) {
             <Link className="matchday-header__admin-link" to="/showcase">
               Public showcase
             </Link>
-            <Link className="matchday-header__admin-link" to="/roster">
-              Manage roster
-            </Link>
             <span className="matchday-header__live">On air</span>
           </div>
         </header>

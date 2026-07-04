@@ -62,7 +62,8 @@
     "production": {
       "vars": {
         // Replace with the real deployed domain.
-        "APP_BASE_URL": "https://fives.samikh.dev"
+        "APP_BASE_URL": "https://fives.samikh.dev",
+        "RESEND_FROM_ADDRESS": "voting@fives.samikh.dev"
       },
       "durable_objects": {
         "bindings": [
@@ -91,6 +92,11 @@
         {
           "name": "VOTE_RATE_LIMITER",
           "namespace_id": "1002",
+          "simple": { "limit": 10, "period": 60 }
+        },
+        {
+          "name": "COMMENT_RATE_LIMITER",
+          "namespace_id": "1003",
           "simple": { "limit": 10, "period": 60 }
         }
       ],

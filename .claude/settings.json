@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/sami/Developer/fives diff a8b4429..e6d35c7 -- frontend/src/lib/voter.ts frontend/src/lib/rivalry.ts frontend/src/components/CommentsSection.tsx frontend/src/pages/PublicFeedPage.tsx frontend/src/pages/PublicSquadPage.tsx frontend/src/router.tsx frontend/index.html frontend/src/lib/api/games.ts)",
+      "Bash(git status *)",
+      "Bash(git -C /Users/sami/Developer/fives diff a8b4429..e6d35c7 -- frontend/src/pages/GameRoomPage.tsx frontend/src/hooks/useGameSocket.ts vitest.workers.config.ts package.json)",
+      "Bash(grep -n \"RESEND_API_KEY\\\\|sk_\\\\|re_[A-Za-z0-9]\\\\{10,\\\\}\" /Users/sami/Developer/fives/worker-configuration.d.ts)",
+      "Bash(git -C /Users/sami/Developer/fives show a8b4429:src/routes/games.ts)",
+      "Bash(git -C /Users/sami/Developer/fives log --oneline -2)",
+      "Bash(rg -n \"router\\\\.\\(get|post|put|delete|patch\\)\" src/routes/*.ts src/index.ts)",
+      "Bash(rg -n \"\\\\.\\(get|post|put|delete|patch\\)\\\\\\(\" src/routes/*.ts src/index.ts)"
+    ]
+  }
+}
