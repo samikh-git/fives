@@ -4,6 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2025-03-01",
   "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
   "vars": {
     "APP_BASE_URL": "http://localhost:8787"
   },
@@ -19,7 +22,7 @@
     {
       "binding": "DB",
       "database_name": "fives",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+      "database_id": "d21e42e6-512b-422b-8470-47b1d423e233"
     }
   ],
   "r2_buckets": [

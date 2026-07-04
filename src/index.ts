@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { logger } from "hono/logger";
 import { playersRouter } from "./routes/players";
 import { playersAdminRouter } from "./routes/players-admin";
 import { gamesRouter } from "./routes/games";
@@ -17,6 +18,9 @@ export interface Env {
 }
 
 const app = new Hono<{ Bindings: Env }>();
+
+app.use("/api/*", logger());
+app.use("/ws/*", logger());
 
 app.route("/api/players", playersRouter);
 app.route("/api/admin/players", playersAdminRouter);
