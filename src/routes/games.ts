@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { MIN_GOALIES_IN_POOL, POOL_SIZE } from "../shared/constants";
+import { GOALIES_IN_POOL, POOL_SIZE } from "../shared/constants";
 import type { Env } from "../index";
-import type { Position } from "../shared/types";
+import type { Captain, Position, SquadEntry } from "../shared/types";
 import type { GameRoom, InitParams } from "../durable-objects/game-room";
 import { generateGameSlug } from "../lib/slug";
 
@@ -141,8 +141,8 @@ async function resolvePool(
     }
 
     const goalies = rows.filter((p) => p.position === "GK");
-    if (goalies.length < MIN_GOALIES_IN_POOL) {
-      return { ok: false, error: `Selected pool must contain at least ${MIN_GOALIES_IN_POOL} goalkeepers` };
+    if (goalies.length !== GOALIES_IN_POOL) {
+      return { ok: false, error: `Selected pool must contain exactly ${GOALIES_IN_POOL} goalkeepers` };
     }
 
     return { ok: true, pool: shuffle(rows) };
@@ -166,19 +166,19 @@ async function resolvePool(
 
   const goalies = rows.filter((p) => p.position === "GK");
   const others = rows.filter((p) => p.position !== "GK");
-  if (goalies.length < MIN_GOALIES_IN_POOL) {
+  if (goalies.length < GOALIES_IN_POOL) {
     return {
       ok: false,
       error: hasFilters
-        ? `Fewer than ${MIN_GOALIES_IN_POOL} goalkeepers match the selected filters`
-        : `Roster must contain at least ${MIN_GOALIES_IN_POOL} goalkeepers`,
+        ? `Fewer than ${GOALIES_IN_POOL} goalkeepers match the selected filters`
+        : `Roster must contain at least ${GOALIES_IN_POOL} goalkeepers`,
     };
   }
 
   const shuffledGoalies = shuffle(goalies);
-  const chosenGoalies = shuffledGoalies.slice(0, MIN_GOALIES_IN_POOL);
-  const remainingCandidates = shuffle([...others, ...shuffledGoalies.slice(MIN_GOALIES_IN_POOL)]);
-  const chosenOthers = remainingCandidates.slice(0, POOL_SIZE - MIN_GOALIES_IN_POOL);
+  const chosenGoalies = shuffledGoalies.slice(0, GOALIES_IN_POOL);
+  const remainingCandidates = shuffle([...others, ...shuffledGoalies.slice(GOALIES_IN_POOL)]);
+  const chosenOthers = remainingCandidates.slice(0, POOL_SIZE - GOALIES_IN_POOL);
 
   return { ok: true, pool: shuffle([...chosenGoalies, ...chosenOthers]) };
 }
@@ -245,6 +245,48 @@ gamesRouter.post("/", async (c) => {
   return c.json({ gameId, captainAToken, joinUrlForB }, 201);
 });
 
+interface CompletedSquadRow {
+  playerId: string;
+  name: string;
+  position: Position;
+  club: string | null;
+  nation: string | null;
+  imageUrl: string | null;
+  captain: "A" | "B";
+  pricePaid: number;
+  roundNumber: number;
+}
+
+/** The `game_players` + `players` join backing both the results JSON and the shareable squad images. */
+async function fetchCompletedSquads(db: D1Database, gameId: string): Promise<CompletedSquadRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT gp.player_id as playerId, p.name as name, p.position as position,
+              p.club as club, p.nation as nation, p.image_url as imageUrl,
+              gp.captain as captain, gp.price_paid as pricePaid, gp.round_number as roundNumber
+       FROM game_players gp
+       JOIN players p ON p.id = gp.player_id
+       WHERE gp.game_id = ?
+       ORDER BY gp.round_number ASC`,
+    )
+    .bind(gameId)
+    .all<CompletedSquadRow>();
+  return results;
+}
+
+function toSquadEntry(row: CompletedSquadRow): SquadEntry {
+  return {
+    playerId: row.playerId,
+    name: row.name,
+    position: row.position,
+    club: row.club,
+    nation: row.nation,
+    imageUrl: row.imageUrl,
+    pricePaid: row.pricePaid,
+    roundNumber: row.roundNumber,
+  };
+}
+
 gamesRouter.get("/:id", async (c) => {
   const gameId = c.req.param("id");
 
@@ -275,27 +317,7 @@ gamesRouter.get("/:id", async (c) => {
     });
   }
 
-  const { results: resultRows } = await c.env.DB.prepare(
-    `SELECT gp.player_id as playerId, p.name as name, p.position as position,
-            p.club as club, p.nation as nation, p.image_url as imageUrl,
-            gp.captain as captain, gp.price_paid as pricePaid, gp.round_number as roundNumber
-     FROM game_players gp
-     JOIN players p ON p.id = gp.player_id
-     WHERE gp.game_id = ?
-     ORDER BY gp.round_number ASC`,
-  )
-    .bind(gameId)
-    .all<{
-      playerId: string;
-      name: string;
-      position: Position;
-      club: string | null;
-      nation: string | null;
-      imageUrl: string | null;
-      captain: "A" | "B";
-      pricePaid: number;
-      roundNumber: number;
-    }>();
+  const resultRows = await fetchCompletedSquads(c.env.DB, gameId);
 
   return c.json({
     gameId: game.id,
@@ -310,4 +332,61 @@ gamesRouter.get("/:id", async (c) => {
       },
     },
   });
+});
+
+async function fetchCompletedGameStatus(db: D1Database, gameId: string): Promise<string | null> {
+  const game = await db.prepare("SELECT status FROM games WHERE id = ?").bind(gameId).first<{ status: string }>();
+  return game?.status ?? null;
+}
+
+gamesRouter.get("/:id/share/:captain{[AB]\\.png}", async (c) => {
+  const gameId = c.req.param("id");
+  const captain = c.req.param("captain").slice(0, 1) as Captain;
+
+  const cache = (caches as unknown as { default: Cache }).default;
+  const cacheKey = new Request(c.req.url);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const status = await fetchCompletedGameStatus(c.env.DB, gameId);
+  if (status === null) return c.json({ error: "Game not found" }, 404);
+  if (status !== "completed") return c.json({ error: "Game is not completed yet" }, 404);
+
+  const resultRows = await fetchCompletedSquads(c.env.DB, gameId);
+  const squad = resultRows.filter((r) => r.captain === captain).map(toSquadEntry);
+  // Dynamically imported so satori/resvg (and their dependency chain) are only loaded when a
+  // share image is actually requested, rather than at Worker startup for every request.
+  const { renderSoloSquadPng } = await import("../lib/squad-image");
+  const png = await renderSoloSquadPng(squad, captain, null);
+
+  const response = new Response(png, {
+    headers: { "content-type": "image/png", "cache-control": "public, max-age=31536000, immutable" },
+  });
+  c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+});
+
+gamesRouter.get("/:id/share/combined.png", async (c) => {
+  const gameId = c.req.param("id");
+
+  const cache = (caches as unknown as { default: Cache }).default;
+  const cacheKey = new Request(c.req.url);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const status = await fetchCompletedGameStatus(c.env.DB, gameId);
+  if (status === null) return c.json({ error: "Game not found" }, 404);
+  if (status !== "completed") return c.json({ error: "Game is not completed yet" }, 404);
+
+  const resultRows = await fetchCompletedSquads(c.env.DB, gameId);
+  const squadA = resultRows.filter((r) => r.captain === "A").map(toSquadEntry);
+  const squadB = resultRows.filter((r) => r.captain === "B").map(toSquadEntry);
+  const { renderCombinedSquadPng } = await import("../lib/squad-image");
+  const png = await renderCombinedSquadPng(squadA, squadB, { A: null, B: null });
+
+  const response = new Response(png, {
+    headers: { "content-type": "image/png", "cache-control": "public, max-age=31536000, immutable" },
+  });
+  c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
 });

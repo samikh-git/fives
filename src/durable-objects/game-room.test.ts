@@ -314,8 +314,11 @@ describe("GameRoom full game completion", () => {
     await stub.handleCaptainConnected("A");
     await stub.handleCaptainConnected("B");
 
+    // Every round's winner is always its firstBidder, and firstBidder alternates each
+    // round, so one captain reaches SQUAD_SIZE after 9 rounds (5 wins to 4) - the 10th
+    // player is auto-awarded to the other captain rather than played out as a round.
     let finalState = await stub.getState();
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 10 && finalState?.phase !== "completed"; i++) {
       const proposed = await stub.proposeNextPlayer();
       if (!proposed.ok) throw new Error("expected ok");
       const firstBidder = proposed.state.round!.firstBidder as Captain;
@@ -329,6 +332,11 @@ describe("GameRoom full game completion", () => {
 
     expect(finalState?.phase).toBe("completed");
     expect(finalState?.squadCounts).toEqual({ A: 5, B: 5 });
+
+    const autoAwarded = (["A", "B"] as Captain[])
+      .flatMap((captain) => finalState!.squads[captain])
+      .find((entry) => entry.pricePaid === 0);
+    expect(autoAwarded).toBeDefined();
 
     const gameRow = await env.DB.prepare("SELECT * FROM games WHERE id = ?").bind(gameId).first<{
       status: string;

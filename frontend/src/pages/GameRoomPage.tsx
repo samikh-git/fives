@@ -11,6 +11,7 @@ import { BudgetPanel } from "../components/BudgetPanel";
 import { SquadPanel } from "../components/SquadPanel";
 import { ResultsTable } from "../components/ResultsTable";
 import { ChatModal } from "../components/ChatModal";
+import { shareOrDownloadImage } from "../lib/shareImage";
 import type { Captain, SquadEntry } from "../../../src/shared/types";
 
 export function GameRoomPage() {
@@ -121,11 +122,41 @@ export function GameRoomPage() {
   }
 
   if (state.phase === "completed") {
+    const myName = state.captainNames[myCaptain] ?? `Captain ${myCaptain}`;
+
     content = (
       <div className="fulltime">
         <span className="fulltime__eyebrow">Full time</span>
         <h1>Final squads</h1>
         <ResultsTable squads={state.squads} captainNames={state.captainNames} />
+        <div className="fulltime__share-row">
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() =>
+              void shareOrDownloadImage(
+                `/api/games/${gameId}/share/${myCaptain}.png`,
+                `${myName}-squad.png`,
+                `${myName}'s squad from our Fives draft`,
+              )
+            }
+          >
+            <ShareNetwork weight="bold" /> Share your squad
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() =>
+              void shareOrDownloadImage(
+                `/api/games/${gameId}/share/combined.png`,
+                "fives-matchup.png",
+                "Our Fives draft matchup",
+              )
+            }
+          >
+            <ShareNetwork weight="bold" /> Share matchup
+          </button>
+        </div>
       </div>
     );
   }

@@ -4,6 +4,7 @@ import { playersRouter } from "./routes/players";
 import { playersAdminRouter } from "./routes/players-admin";
 import { gamesRouter } from "./routes/games";
 import { wsRouter } from "./routes/ws";
+import { deleteExpiredGames } from "./lib/cleanup";
 
 export { GameRoom } from "./durable-objects/game-room";
 
@@ -29,4 +30,9 @@ app.route("/ws/games", wsRouter);
 
 app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
-export default app satisfies ExportedHandler<Env>;
+export default {
+  fetch: app.fetch,
+  async scheduled(_event, env) {
+    await deleteExpiredGames(env.DB);
+  },
+} satisfies ExportedHandler<Env>;

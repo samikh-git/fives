@@ -4,7 +4,7 @@ import { createGame } from "../lib/api/games";
 import type { PoolFilters as ApiPoolFilters } from "../lib/api/games";
 import * as playersApi from "../lib/api/players";
 import { saveCaptainSession } from "../lib/session";
-import { MAX_CAPTAIN_NAME_LENGTH, MIN_GOALIES_IN_POOL, POOL_SIZE } from "../../../src/shared/constants";
+import { GOALIES_IN_POOL, MAX_CAPTAIN_NAME_LENGTH, POOL_SIZE } from "../../../src/shared/constants";
 import type { Player } from "../../../src/shared/types";
 
 type PoolMode = "random" | "manual";
@@ -98,7 +98,7 @@ export function CreateGamePage() {
     (p) => selectedIds.has(p.id) && p.position === "GK",
   ).length;
   const canSubmitManual =
-    selectedIds.size === POOL_SIZE && selectedGoalieCount >= MIN_GOALIES_IN_POOL;
+    selectedIds.size === POOL_SIZE && selectedGoalieCount === GOALIES_IN_POOL;
 
   function toggleSelected(id: string) {
     setSelectedIds((prev) => {
@@ -259,7 +259,7 @@ export function CreateGamePage() {
       {mode === "manual" && (
         <div className="create-game__player-picker">
           <p className="status-line">
-            {selectedIds.size}/{POOL_SIZE} selected · {selectedGoalieCount}/{MIN_GOALIES_IN_POOL}{" "}
+            {selectedIds.size}/{POOL_SIZE} selected · {selectedGoalieCount}/{GOALIES_IN_POOL}{" "}
             goalkeepers
           </p>
           <ul className="create-game__player-list">
@@ -269,7 +269,11 @@ export function CreateGamePage() {
                   <input
                     type="checkbox"
                     checked={selectedIds.has(player.id)}
-                    disabled={!selectedIds.has(player.id) && selectedIds.size >= POOL_SIZE}
+                    disabled={
+                      !selectedIds.has(player.id) &&
+                      (selectedIds.size >= POOL_SIZE ||
+                        (player.position === "GK" && selectedGoalieCount >= GOALIES_IN_POOL))
+                    }
                     onChange={() => toggleSelected(player.id)}
                   />
                   {player.imageUrl && (

@@ -75,7 +75,7 @@ async function seedPlayersWithLeague(
 }
 
 describe("POST /games", () => {
-  it("rejects when the roster has fewer than MIN_GOALIES_IN_POOL goalkeepers", async () => {
+  it("rejects when the roster has fewer than GOALIES_IN_POOL goalkeepers", async () => {
     await seedPlayers(
       "onegk",
       ["GK", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"],
@@ -196,10 +196,23 @@ describe("POST /games", () => {
     expect(body.error).toMatch(/exactly 10/i);
   });
 
-  it("rejects a hand-picked pool with fewer than MIN_GOALIES_IN_POOL goalkeepers", async () => {
+  it("rejects a hand-picked pool with fewer than GOALIES_IN_POOL goalkeepers", async () => {
     const ids = await seedPlayers(
       "manualonegk",
       ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"],
+    );
+
+    const res = await postCreateGame({ selectedPlayerIds: ids });
+
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toMatch(/goalkeeper/i);
+  });
+
+  it("rejects a hand-picked pool with more than GOALIES_IN_POOL goalkeepers", async () => {
+    const ids = await seedPlayers(
+      "manualfourgk",
+      ["GK", "GK", "GK", "GK", "DEF", "DEF", "MID", "MID", "ATT", "ATT"],
     );
 
     const res = await postCreateGame({ selectedPlayerIds: ids });
@@ -335,13 +348,18 @@ describe("GET /games/:id", () => {
     await stub.handleCaptainConnected("A");
     await stub.handleCaptainConnected("B");
 
-    for (let i = 0; i < 10; i++) {
+    // One captain reaches SQUAD_SIZE after 9 rounds (see the equivalent full-game test in
+    // game-room.test.ts), auto-awarding the 10th player rather than playing out a round.
+    let phase: string | undefined;
+    for (let i = 0; i < 10 && phase !== "completed"; i++) {
       const proposed = await stub.proposeNextPlayer();
       if (!proposed.ok) throw new Error("expected ok");
       const firstBidder = proposed.state.round!.firstBidder;
       const other = firstBidder === "A" ? "B" : "A";
       await stub.placeBid(firstBidder, MIN_BID_INCREMENT);
-      await stub.pass(other);
+      const passed = await stub.pass(other);
+      if (!passed.ok) throw new Error("expected ok");
+      phase = passed.state.phase;
     }
 
     const res = await gamesRouter.request(`/${gameId}`, {}, env);

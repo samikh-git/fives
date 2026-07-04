@@ -1314,6 +1314,14 @@ select {
   color: var(--floodlight);
 }
 
+.fulltime__share-row {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  flex-wrap: wrap;
+}
+
 /* ---------------------------------- chat (header toggle + modal) -------- */
 
 .matchday-header__chat-slot {

@@ -23,6 +23,8 @@ CREATE TABLE games (
   public_slug TEXT UNIQUE
 );
 
+CREATE INDEX IF NOT EXISTS idx_games_created_at ON games (created_at);
+
 CREATE TABLE game_pool (
   game_id TEXT NOT NULL REFERENCES games(id),
   player_id TEXT NOT NULL REFERENCES players(id),

@@ -10,7 +10,9 @@
     "test:unit": "vitest --config vitest.config.ts",
     "test:workers": "vitest --config vitest.workers.config.ts",
     "deploy": "npm run build && wrangler deploy --env production",
-    "db:migrate:local": "wrangler d1 execute fives --local --file=src/db/schema.sql"
+    "db:migrate:local": "wrangler d1 execute fives --local --file=src/db/schema.sql",
+    "db:migrate:local:0001": "wrangler d1 execute fives --local --file=src/db/migrations/0001_add_games_created_at_index.sql",
+    "db:migrate:prod:0001": "wrangler d1 execute fives --remote --env production --file=src/db/migrations/0001_add_games_created_at_index.sql"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.0",
@@ -31,8 +33,10 @@
     "wrangler": "^4.7.0"
   },
   "dependencies": {
+    "@cf-wasm/resvg": "^0.3.4",
     "@phosphor-icons/react": "^2.1.10",
     "obscenity": "^0.4.6",
+    "satori": "^0.26.0",
     "striptags": "^3.2.0"
   }
 }

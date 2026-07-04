@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../index";
 import {
+  GAME_DO_TTL_MS,
   MAX_CAPTAIN_NAME_LENGTH,
   MAX_CHAT_MESSAGE_LENGTH,
   MIN_BID_INCREMENT,
@@ -156,11 +157,21 @@ export class GameRoom extends DurableObject<Env> {
     return JSON.parse(row.data) as InternalState;
   }
 
-  private saveState(state: InternalState): void {
+  private async saveState(state: InternalState): Promise<void> {
     this.ctx.storage.sql.exec(
       "INSERT INTO state (id, data) VALUES (0, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
       JSON.stringify(state),
     );
+    // Every mutation refreshes the TTL: an idle game's DO state is wiped by `alarm()` below.
+    await this.ctx.storage.setAlarm(Date.now() + GAME_DO_TTL_MS);
+  }
+
+  /** Fires GAME_DO_TTL_MS after the last mutation with no renewal in between: the game went idle, so drop its state. */
+  async alarm(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) {
+      ws.close(1000, "game expired");
+    }
+    await this.ctx.storage.deleteAll();
   }
 
   private requireState(): InternalState {
@@ -204,7 +215,7 @@ export class GameRoom extends DurableObject<Env> {
       chatMessages: [],
     };
 
-    this.saveState(state);
+    await this.saveState(state);
     return toPublicState(state);
   }
 
@@ -224,7 +235,7 @@ export class GameRoom extends DurableObject<Env> {
         .run();
     }
 
-    this.saveState(state);
+    await this.saveState(state);
     return toPublicState(state);
   }
 
@@ -233,7 +244,7 @@ export class GameRoom extends DurableObject<Env> {
     const state = this.requireState();
     const cleaned = sanitizeCaptainName(name);
     if (cleaned) state.captainNames[captain] = cleaned;
-    this.saveState(state);
+    await this.saveState(state);
     return toPublicState(state);
   }
 
@@ -289,7 +300,7 @@ export class GameRoom extends DurableObject<Env> {
     };
     state.nextProposalIndex += 1;
 
-    this.saveState(state);
+    await this.saveState(state);
     return ok(toPublicState(state));
   }
 
@@ -333,7 +344,7 @@ export class GameRoom extends DurableObject<Env> {
     round.subphase = "awaiting_response";
     round.turn = otherCaptain(captain);
 
-    this.saveState(state);
+    await this.saveState(state);
     return ok(toPublicState(state));
   }
 
@@ -373,16 +384,49 @@ export class GameRoom extends DurableObject<Env> {
     state.lastRoundFirstBidder = round.firstBidder;
     state.round = null;
 
+    this.autoAwardRemainingPoolIfOneSquadIsFull(state);
+
     const completed = state.squadCounts.A === SQUAD_SIZE && state.squadCounts.B === SQUAD_SIZE;
     if (completed) state.phase = "completed";
 
-    this.saveState(state);
+    await this.saveState(state);
 
     if (completed) {
       await this.persistFinalResultToD1(state);
     }
 
     return ok(toPublicState(state));
+  }
+
+  /**
+   * Once a captain's squad hits SQUAD_SIZE, bidding on the rest of the pool is pointless -
+   * the reserve rule already stops that captain from bidding again, so every remaining
+   * player would go to the other captain one uncontested round at a time anyway. Skip
+   * straight to awarding them all at price 0 instead of playing out empty rounds.
+   */
+  private autoAwardRemainingPoolIfOneSquadIsFull(state: InternalState): void {
+    const fullCaptain: Captain | null =
+      state.squadCounts.A === SQUAD_SIZE ? "A" : state.squadCounts.B === SQUAD_SIZE ? "B" : null;
+    if (!fullCaptain) return;
+
+    const other = otherCaptain(fullCaptain);
+    if (state.squadCounts[other] === SQUAD_SIZE) return;
+
+    for (const entry of state.pool.slice(state.nextProposalIndex)) {
+      state.squadCounts[other] += 1;
+      state.squads[other].push({
+        playerId: entry.playerId,
+        name: entry.name,
+        position: entry.position,
+        club: entry.club,
+        nation: entry.nation,
+        imageUrl: entry.imageUrl,
+        pricePaid: 0,
+        roundNumber: state.nextProposalIndex + 1,
+      });
+      entry.status = "sold";
+      state.nextProposalIndex += 1;
+    }
   }
 
   async sendChatMessage(captain: Captain, text: string): Promise<ActionResult<ChatEntry>> {
@@ -407,7 +451,7 @@ export class GameRoom extends DurableObject<Env> {
       state.chatMessages.shift();
     }
 
-    this.saveState(state);
+    await this.saveState(state);
     return ok(entry);
   }
 
@@ -475,7 +519,7 @@ export class GameRoom extends DurableObject<Env> {
     ) {
       state.phase = "in_progress";
     }
-    this.saveState(state);
+    await this.saveState(state);
 
     this.broadcast({ type: "captain_joined", captain });
     if (!wasInProgress && state.phase === "in_progress") {

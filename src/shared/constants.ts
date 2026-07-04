@@ -2,7 +2,14 @@ export const STARTING_BUDGET = 250_000_000;
 export const MIN_BID_INCREMENT = 5_000_000;
 export const POOL_SIZE = 10;
 export const SQUAD_SIZE = 5;
-export const MIN_GOALIES_IN_POOL = 2;
+/** Exact number of goalkeepers required in every 10-player pool — not just a minimum, a hard cap too. */
+export const GOALIES_IN_POOL = 2;
+
+// ---- Retention ----
+/** GameRoom DO state is wiped by its alarm after this long without any activity (refreshed on every mutation). */
+export const GAME_DO_TTL_MS = 2 * 24 * 60 * 60 * 1000;
+/** Non-completed games (and their game_pool rows) older than this are purged by the daily cleanup cron. Completed games are kept indefinitely. */
+export const ABANDONED_GAME_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 // ---- Free-text input limits ----
 // Enforced server-side (authoritative); frontend inputs mirror these via maxLength
