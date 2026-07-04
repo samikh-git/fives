@@ -47,8 +47,33 @@
     "production": {
       "vars": {
         // Replace with the real deployed domain.
-        "APP_BASE_URL": "https://fives.sami-houssaini.workers.dev"
-      }
+        "APP_BASE_URL": "https://fives-production.sami-houssaini.workers.dev"
+      },
+      "durable_objects": {
+        "bindings": [
+          { "name": "GAME_ROOM", "class_name": "GameRoom" }
+        ]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "fives",
+          "database_id": "d21e42e6-512b-422b-8470-47b1d423e233"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "PLAYER_IMAGES",
+          "bucket_name": "fives-player-images"
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "CREATE_GAME_RATE_LIMITER",
+          "namespace_id": "1001",
+          "simple": { "limit": 5, "period": 60 }
+        }
+      ]
     }
   }
 }

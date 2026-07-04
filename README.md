@@ -6,12 +6,14 @@ Two captains each build a 5-player squad by bidding against each other, player b
 
 ## How a game works
 
-1. One captain creates a game by picking exactly **10 players** from the shared roster, with **at least 2 goalkeepers** in that pool. Final squads don't have to include a goalkeeper — the pool just has to guarantee some are available.
+1. One captain creates a game by picking exactly **10 players** for the pool, with **at least 2 goalkeepers** in that pool. Final squads don't have to include a goalkeeper — the pool just has to guarantee some are available. The pool can be a random draw from the shared roster (optionally filtered by league, club, or nation) or hand-picked by the creator.
 2. The creator (Captain A) gets a shareable join link containing Captain B's access token. No accounts or sign-in are required — the link *is* the credential.
 3. Once both captains are connected, players are proposed one at a time in a random order fixed at game creation.
 4. For each player, one captain is the "first bidder" (this role alternates every round). The first bidder must place an opening bid — they can't concede before any bid exists. After that, captains alternate raising the bid (by at least $5,000,000) or passing. A pass ends the round: the player goes to whoever is currently winning, at that price.
 5. Each captain starts with **$250,000,000**. A bid can never exceed what's left after reserving the minimum increment for every squad slot still needed — you can't spend so much on one player that you're unable to afford the rest of your squad.
 6. The game ends when both captains have 5 players. Final squads (with prices paid) are shown side by side.
+
+Captains can also chat live during a game and set a display name; both are shown alongside the bidding.
 
 ## Getting started
 
@@ -37,11 +39,21 @@ npm run test:workers  # backend + Durable Object + D1 (real Workers runtime)
 npx tsc --noEmit        # typecheck
 ```
 
+### Deploying
+
+```bash
+npm run deploy   # build + wrangler deploy --env production
+```
+
+The production environment's `APP_BASE_URL` and other bindings (D1, the `PLAYER_IMAGES` R2 bucket, the game-creation rate limiter) are configured in `wrangler.jsonc`.
+
 ## Tech stack
 
 - **Cloudflare Workers** — HTTP API and static asset hosting (single Worker, single origin)
-- **Durable Objects** (SQLite-backed, WebSocket Hibernation API) — one instance per game, holding the authoritative live bidding state
+- **Durable Objects** (SQLite-backed, WebSocket Hibernation API) — one instance per game, holding the authoritative live bidding state and in-game chat
 - **D1** — persistent player roster and completed-game records
+- **R2** — player roster photos
+- **Workers rate limiting** — throttles game creation per client IP
 - **React + Vite**, served as static assets by the Worker
 - **Hono** for routing, **Vitest** (+ `@cloudflare/vitest-pool-workers` for real D1/DO integration tests)
 
@@ -49,7 +61,6 @@ See [CLAUDE.md](./CLAUDE.md) / [AGENTS.md](./AGENTS.md) for a deeper architectur
 
 ## Current status / known limitations
 
-- No styling — the UI is currently unstyled semantic HTML. Functional correctness was built first.
 - No accounts; captain identity is a bearer token in the join link, stored in the browser's localStorage.
 - Roster is a single shared list (no per-group scoping).
 - Publishing completed games publicly for third-party voting on "best squad" is a planned future feature — the schema reserves columns for it (`games.published_at`, `games.public_slug`) but it isn't built yet.
