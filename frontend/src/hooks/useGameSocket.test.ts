@@ -55,6 +55,8 @@ const sampleState: GameState = {
   squads: { A: [], B: [] },
   lastRoundFirstBidder: null,
   round: null,
+  publishConsent: { A: false, B: false },
+  publicSlug: null,
 };
 
 beforeEach(() => {
@@ -173,6 +175,31 @@ describe("useGameSocket", () => {
     });
 
     expect(JSON.parse(socket.sent[0]!)).toEqual({ type: "send_chat", text: "gg" });
+  });
+
+  it("sends a request_publish message, with notifyEmail omitted when not given", () => {
+    const { result } = renderHook(() => useGameSocket("game-1", "token-1"));
+    const socket = FakeWebSocket.instances[0]!;
+
+    act(() => {
+      result.current.requestPublish();
+    });
+
+    expect(JSON.parse(socket.sent[0]!)).toEqual({ type: "request_publish" });
+  });
+
+  it("sends a request_publish message with the given notifyEmail", () => {
+    const { result } = renderHook(() => useGameSocket("game-1", "token-1"));
+    const socket = FakeWebSocket.instances[0]!;
+
+    act(() => {
+      result.current.requestPublish("a@example.com");
+    });
+
+    expect(JSON.parse(socket.sent[0]!)).toEqual({
+      type: "request_publish",
+      notifyEmail: "a@example.com",
+    });
   });
 
   it("keeps reconnecting with backoff across repeated closes, not just once", async () => {

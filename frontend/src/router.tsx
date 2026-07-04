@@ -5,6 +5,8 @@ import { RosterPage } from "./pages/RosterPage";
 import { CreateGamePage } from "./pages/CreateGamePage";
 import { JoinGamePage } from "./pages/JoinGamePage";
 import { GameRoomPage } from "./pages/GameRoomPage";
+import { PublicSquadPage } from "./pages/PublicSquadPage";
+import { PublicFeedPage } from "./pages/PublicFeedPage";
 import { ChatToggleSlotContext } from "./lib/chatToggleSlot";
 
 function HomePage() {
@@ -53,6 +55,9 @@ function AppShell({ children }: { children: ReactNode }) {
           </Link>
           <div className="matchday-header__actions">
             <div className="matchday-header__chat-slot" ref={setChatToggleSlot} />
+            <Link className="matchday-header__admin-link" to="/showcase">
+              Public showcase
+            </Link>
             <Link className="matchday-header__admin-link" to="/roster">
               Manage roster
             </Link>
@@ -85,6 +90,8 @@ export function AppRouter() {
           <Route path="/games/new" element={<CreateGamePage />} />
           <Route path="/game/:gameId/join" element={<JoinGamePage />} />
           <Route path="/game/:gameId" element={<GameRoomPage />} />
+          <Route path="/showcase" element={<PublicFeedPage />} />
+          <Route path="/showcase/:slug" element={<PublicSquadPage />} />
         </Routes>
       </AppShell>
     </BrowserRouter>

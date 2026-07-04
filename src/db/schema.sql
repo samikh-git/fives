@@ -20,10 +20,32 @@ CREATE TABLE games (
   started_at INTEGER,
   completed_at INTEGER,
   published_at INTEGER,
-  public_slug TEXT UNIQUE
+  public_slug TEXT UNIQUE,
+  voting_closes_at INTEGER,
+  captain_a_notify_email TEXT,
+  captain_b_notify_email TEXT,
+  voting_closed_notified_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_games_created_at ON games (created_at);
+
+CREATE TABLE game_votes (
+  game_id TEXT NOT NULL REFERENCES games(id),
+  voter_id TEXT NOT NULL,
+  choice TEXT NOT NULL CHECK (choice IN ('A','B')),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (game_id, voter_id)
+);
+
+CREATE TABLE game_comments (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL REFERENCES games(id),
+  author_name TEXT,
+  text TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_game_comments_game_id ON game_comments (game_id, created_at);
 
 CREATE TABLE game_pool (
   game_id TEXT NOT NULL REFERENCES games(id),

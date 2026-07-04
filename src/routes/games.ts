@@ -1,9 +1,19 @@
 import { Hono } from "hono";
-import { GOALIES_IN_POOL, POOL_SIZE } from "../shared/constants";
+import {
+  GOALIES_IN_POOL,
+  MAX_COMMENT_AUTHOR_NAME_LENGTH,
+  MAX_COMMENT_TEXT_LENGTH,
+  POOL_SIZE,
+  PUBLIC_COMMENTS_LIMIT,
+  PUBLIC_FEED_SIZE,
+  PUBLIC_POST_RETENTION_MS,
+} from "../shared/constants";
 import type { Env } from "../index";
 import type { Captain, Position, SquadEntry } from "../shared/types";
 import type { GameRoom, InitParams } from "../durable-objects/game-room";
 import { generateGameSlug } from "../lib/slug";
+import { sanitizeText } from "../shared/sanitize";
+import { containsProfanity } from "../shared/moderation";
 
 const MAX_SLUG_ATTEMPTS = 10;
 
@@ -174,11 +184,17 @@ async function resolvePool(
         : `Roster must contain at least ${GOALIES_IN_POOL} goalkeepers`,
     };
   }
+  if (others.length < POOL_SIZE - GOALIES_IN_POOL) {
+    return {
+      ok: false,
+      error: hasFilters
+        ? `Fewer than ${POOL_SIZE - GOALIES_IN_POOL} non-goalkeepers match the selected filters`
+        : `Roster must contain at least ${POOL_SIZE - GOALIES_IN_POOL} non-goalkeepers`,
+    };
+  }
 
-  const shuffledGoalies = shuffle(goalies);
-  const chosenGoalies = shuffledGoalies.slice(0, GOALIES_IN_POOL);
-  const remainingCandidates = shuffle([...others, ...shuffledGoalies.slice(GOALIES_IN_POOL)]);
-  const chosenOthers = remainingCandidates.slice(0, POOL_SIZE - GOALIES_IN_POOL);
+  const chosenGoalies = shuffle(goalies).slice(0, GOALIES_IN_POOL);
+  const chosenOthers = shuffle(others).slice(0, POOL_SIZE - GOALIES_IN_POOL);
 
   return { ok: true, pool: shuffle([...chosenGoalies, ...chosenOthers]) };
 }
@@ -240,7 +256,7 @@ gamesRouter.post("/", async (c) => {
   const stub = gameRoom.get(gameRoom.idFromName(gameId));
   await stub.init(initParams);
 
-  const joinUrlForB = `${c.env.APP_BASE_URL}/game/${gameId}/join?t=${captainBToken}`;
+  const joinUrlForB = `${new URL(c.req.url).origin}/game/${gameId}/join?t=${captainBToken}`;
 
   return c.json({ gameId, captainAToken, joinUrlForB }, 201);
 });
@@ -286,6 +302,32 @@ function toSquadEntry(row: CompletedSquadRow): SquadEntry {
     roundNumber: row.roundNumber,
   };
 }
+
+// Registered before the single-segment "/:id" route below: Hono matches route
+// definitions in registration order, so "/public" (the showcase feed) must come
+// first or "/:id" would swallow it with id="public" and 404 on a nonexistent game.
+gamesRouter.get("/public", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, public_slug, published_at, voting_closes_at FROM games
+     WHERE published_at IS NOT NULL
+     ORDER BY published_at DESC
+     LIMIT ?`,
+  )
+    .bind(PUBLIC_FEED_SIZE)
+    .all<{ id: string; public_slug: string; published_at: number; voting_closes_at: number }>();
+
+  const games = await Promise.all(
+    results.map(async (row) => ({
+      gameId: row.id,
+      publicSlug: row.public_slug,
+      votingClosesAt: row.voting_closes_at,
+      expiresAt: row.published_at + PUBLIC_POST_RETENTION_MS,
+      tallies: await fetchVoteTallies(c.env.DB, row.id),
+    })),
+  );
+
+  return c.json({ games });
+});
 
 gamesRouter.get("/:id", async (c) => {
   const gameId = c.req.param("id");
@@ -379,6 +421,230 @@ gamesRouter.get("/:id/share/combined.png", async (c) => {
   if (status !== "completed") return c.json({ error: "Game is not completed yet" }, 404);
 
   const resultRows = await fetchCompletedSquads(c.env.DB, gameId);
+  const squadA = resultRows.filter((r) => r.captain === "A").map(toSquadEntry);
+  const squadB = resultRows.filter((r) => r.captain === "B").map(toSquadEntry);
+  const { renderCombinedSquadPng } = await import("../lib/squad-image");
+  const png = await renderCombinedSquadPng(squadA, squadB, { A: null, B: null });
+
+  const response = new Response(png, {
+    headers: { "content-type": "image/png", "cache-control": "public, max-age=31536000, immutable" },
+  });
+  c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
+  return response;
+});
+
+interface PublishedGameRow {
+  id: string;
+  published_at: number;
+  voting_closes_at: number;
+}
+
+/** Looks up a published, not-yet-expired game by its public_slug. Games whose publish state has been cleared by the expiry sweep are indistinguishable from unknown slugs. */
+async function fetchPublishedGame(db: D1Database, slug: string): Promise<PublishedGameRow | null> {
+  const row = await db
+    .prepare(
+      "SELECT id, published_at, voting_closes_at FROM games WHERE public_slug = ? AND published_at IS NOT NULL",
+    )
+    .bind(slug)
+    .first<PublishedGameRow>();
+  return row ?? null;
+}
+
+async function fetchVoteTallies(db: D1Database, gameId: string): Promise<{ A: number; B: number }> {
+  const { results } = await db
+    .prepare("SELECT choice, COUNT(*) as count FROM game_votes WHERE game_id = ? GROUP BY choice")
+    .bind(gameId)
+    .all<{ choice: Captain; count: number }>();
+  const tallies = { A: 0, B: 0 };
+  for (const row of results) tallies[row.choice] = row.count;
+  return tallies;
+}
+
+gamesRouter.get("/public/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  const game = await fetchPublishedGame(c.env.DB, slug);
+  if (!game) return c.json({ error: "Not found" }, 404);
+
+  const resultRows = await fetchCompletedSquads(c.env.DB, game.id);
+  const tallies = await fetchVoteTallies(c.env.DB, game.id);
+
+  return c.json({
+    gameId: game.id,
+    squads: {
+      A: resultRows.filter((r) => r.captain === "A").map(toSquadEntry),
+      B: resultRows.filter((r) => r.captain === "B").map(toSquadEntry),
+    },
+    votingClosesAt: game.voting_closes_at,
+    expiresAt: game.published_at + PUBLIC_POST_RETENTION_MS,
+    tallies,
+  });
+});
+
+interface VoteBody {
+  choice?: unknown;
+  voterId?: unknown;
+}
+
+gamesRouter.post("/public/:slug/vote", async (c) => {
+  const clientIp = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const { success } = await c.env.VOTE_RATE_LIMITER.limit({ key: clientIp });
+  if (!success) {
+    return c.json({ error: "Too many votes recently. Please try again later." }, 429);
+  }
+
+  const slug = c.req.param("slug");
+  const game = await fetchPublishedGame(c.env.DB, slug);
+  if (!game) return c.json({ error: "Not found" }, 404);
+  if (Date.now() > game.voting_closes_at) {
+    return c.json({ error: "Voting has closed for this game" }, 410);
+  }
+
+  const body = await c.req.json<VoteBody>().catch((): VoteBody => ({}));
+  if (
+    (body.choice !== "A" && body.choice !== "B") ||
+    typeof body.voterId !== "string" ||
+    !body.voterId
+  ) {
+    return c.json({ error: "choice must be 'A' or 'B' and voterId is required" }, 400);
+  }
+
+  await c.env.DB.prepare(
+    "INSERT OR IGNORE INTO game_votes (game_id, voter_id, choice, created_at) VALUES (?, ?, ?, ?)",
+  )
+    .bind(game.id, body.voterId, body.choice, Date.now())
+    .run();
+
+  const tallies = await fetchVoteTallies(c.env.DB, game.id);
+  return c.json({ tallies });
+});
+
+interface CommentRow {
+  id: string;
+  author_name: string | null;
+  text: string;
+  created_at: number;
+}
+
+interface PublicComment {
+  id: string;
+  authorName: string | null;
+  text: string;
+  createdAt: number;
+}
+
+function toPublicComment(row: CommentRow): PublicComment {
+  return { id: row.id, authorName: row.author_name, text: row.text, createdAt: row.created_at };
+}
+
+async function fetchComments(db: D1Database, gameId: string): Promise<PublicComment[]> {
+  const { results } = await db
+    .prepare(
+      "SELECT id, author_name, text, created_at FROM game_comments WHERE game_id = ? ORDER BY created_at ASC LIMIT ?",
+    )
+    .bind(gameId, PUBLIC_COMMENTS_LIMIT)
+    .all<CommentRow>();
+  return results.map(toPublicComment);
+}
+
+gamesRouter.get("/public/:slug/comments", async (c) => {
+  const slug = c.req.param("slug");
+  const game = await fetchPublishedGame(c.env.DB, slug);
+  if (!game) return c.json({ error: "Not found" }, 404);
+
+  const comments = await fetchComments(c.env.DB, game.id);
+  return c.json({ comments });
+});
+
+interface CommentBody {
+  authorName?: unknown;
+  anonymous?: unknown;
+  text?: unknown;
+}
+
+/**
+ * Mirrors sendChatMessage's validation (sanitize -> trim -> length cap -> profanity check)
+ * so free text on the public showcase page is held to the same bar as in-game chat.
+ * A commenter must either pick a non-empty, non-profane username or explicitly go
+ * anonymous - there is no "empty name" fallback like the captain-name path uses, since
+ * this is a one-shot form submission with a round trip to surface the error on.
+ */
+function parseComment(body: CommentBody): { ok: true; authorName: string | null; text: string } | { ok: false; error: string } {
+  const anonymous = body.anonymous === true;
+
+  let authorName: string | null = null;
+  if (!anonymous) {
+    if (typeof body.authorName !== "string") {
+      return { ok: false, error: "authorName is required unless posting anonymously" };
+    }
+    const cleanedName = sanitizeText(body.authorName).trim().slice(0, MAX_COMMENT_AUTHOR_NAME_LENGTH);
+    if (!cleanedName) {
+      return { ok: false, error: "authorName is required unless posting anonymously" };
+    }
+    if (containsProfanity(cleanedName)) {
+      return { ok: false, error: "Username flagged as inappropriate" };
+    }
+    authorName = cleanedName;
+  }
+
+  if (typeof body.text !== "string") {
+    return { ok: false, error: "text is required" };
+  }
+  const cleanedText = sanitizeText(body.text).trim().slice(0, MAX_COMMENT_TEXT_LENGTH);
+  if (!cleanedText) {
+    return { ok: false, error: "Comment cannot be empty" };
+  }
+  if (containsProfanity(cleanedText)) {
+    return { ok: false, error: "Comment flagged as inappropriate" };
+  }
+
+  return { ok: true, authorName, text: cleanedText };
+}
+
+gamesRouter.post("/public/:slug/comments", async (c) => {
+  const clientIp = c.req.header("CF-Connecting-IP") ?? "unknown";
+  const { success } = await c.env.COMMENT_RATE_LIMITER.limit({ key: clientIp });
+  if (!success) {
+    return c.json({ error: "Too many comments recently. Please try again later." }, 429);
+  }
+
+  const slug = c.req.param("slug");
+  const game = await fetchPublishedGame(c.env.DB, slug);
+  if (!game) return c.json({ error: "Not found" }, 404);
+
+  const body = await c.req.json<CommentBody>().catch((): CommentBody => ({}));
+  const parsed = parseComment(body);
+  if (!parsed.ok) {
+    return c.json({ error: parsed.error }, 400);
+  }
+
+  const comment: PublicComment = {
+    id: crypto.randomUUID(),
+    authorName: parsed.authorName,
+    text: parsed.text,
+    createdAt: Date.now(),
+  };
+
+  await c.env.DB.prepare(
+    "INSERT INTO game_comments (id, game_id, author_name, text, created_at) VALUES (?, ?, ?, ?, ?)",
+  )
+    .bind(comment.id, game.id, comment.authorName, comment.text, comment.createdAt)
+    .run();
+
+  return c.json({ comment }, 201);
+});
+
+gamesRouter.get("/public/:slug/share/combined.png", async (c) => {
+  const slug = c.req.param("slug");
+
+  const cache = (caches as unknown as { default: Cache }).default;
+  const cacheKey = new Request(c.req.url);
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const game = await fetchPublishedGame(c.env.DB, slug);
+  if (!game) return c.json({ error: "Not found" }, 404);
+
+  const resultRows = await fetchCompletedSquads(c.env.DB, game.id);
   const squadA = resultRows.filter((r) => r.captain === "A").map(toSquadEntry);
   const squadB = resultRows.filter((r) => r.captain === "B").map(toSquadEntry);
   const { renderCombinedSquadPng } = await import("../lib/squad-image");

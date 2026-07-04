@@ -4,14 +4,17 @@ import {
   GAME_DO_TTL_MS,
   MAX_CAPTAIN_NAME_LENGTH,
   MAX_CHAT_MESSAGE_LENGTH,
+  MAX_EMAIL_LENGTH,
   MIN_BID_INCREMENT,
   POOL_SIZE,
+  PUBLISH_VOTING_WINDOW_MS,
   SQUAD_SIZE,
   STARTING_BUDGET,
 } from "../shared/constants";
 import { computeMaxLegalBid, isLegalBid } from "../shared/rules";
 import { sanitizeText } from "../shared/sanitize";
 import { containsProfanity } from "../shared/moderation";
+import { generateGameSlug } from "../lib/slug";
 import type {
   Captain,
   GameState,
@@ -37,6 +40,13 @@ function sanitizeCaptainName(raw: string): string | null {
   const cleaned = sanitizeText(raw).trim().slice(0, MAX_CAPTAIN_NAME_LENGTH);
   if (!cleaned || containsProfanity(cleaned)) return null;
   return cleaned;
+}
+
+/** A malformed/overlong/omitted notify-email is silently dropped (opt-in, non-essential) rather than rejecting the publish request. */
+function sanitizeNotifyEmail(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw.trim().slice(0, MAX_EMAIL_LENGTH);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleaned) ? cleaned : null;
 }
 
 /**
@@ -104,6 +114,11 @@ interface InternalState {
 
   /** Not part of the public GameState: chat is a side channel, broadcast/replayed separately. */
   chatMessages: ChatEntry[];
+
+  publishConsent: Record<Captain, boolean>;
+  publicSlug: string | null;
+  /** Not part of the public GameState: each captain's optional notify-on-close email, written through to D1 once both consent. */
+  notifyEmails: Record<Captain, string | null>;
 }
 
 function otherCaptain(captain: Captain): Captain {
@@ -124,6 +139,8 @@ function toPublicState(state: InternalState): GameState {
     squads: state.squads,
     lastRoundFirstBidder: state.lastRoundFirstBidder,
     round: state.round,
+    publishConsent: state.publishConsent,
+    publicSlug: state.publicSlug,
   };
 }
 
@@ -213,6 +230,9 @@ export class GameRoom extends DurableObject<Env> {
       lastRoundFirstBidder: null,
       round: null,
       chatMessages: [],
+      publishConsent: { A: false, B: false },
+      publicSlug: null,
+      notifyEmails: { A: null, B: null },
     };
 
     await this.saveState(state);
@@ -455,6 +475,49 @@ export class GameRoom extends DurableObject<Env> {
     return ok(entry);
   }
 
+  /** Two-word public_slug is a separate namespace from game ids; retry against uniqueness there. */
+  private async allocatePublicSlug(): Promise<string> {
+    const MAX_SLUG_ATTEMPTS = 10;
+    for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
+      const candidate = generateGameSlug();
+      const existing = await this.env.DB.prepare("SELECT 1 FROM games WHERE public_slug = ?")
+        .bind(candidate)
+        .first();
+      if (!existing) return candidate;
+    }
+    return crypto.randomUUID();
+  }
+
+  /**
+   * Records one captain's consent to publish this completed game to the public voting page.
+   * Once both have consented, allocates a public_slug and writes the publish decision through
+   * to D1 (mirroring persistFinalResultToD1's "DO decides, D1 durably records" pattern) - the
+   * public page and vote-casting route read D1, not this DO, so this is a one-time transition.
+   */
+  async requestPublish(captain: Captain, notifyEmail: string | null): Promise<ActionResult<GameState>> {
+    const state = this.requireState();
+    if (state.phase !== "completed") {
+      return err("GAME_NOT_COMPLETED", "Game must be completed before it can be published");
+    }
+
+    state.publishConsent[captain] = true;
+    state.notifyEmails[captain] = notifyEmail;
+
+    if (state.publishConsent.A && state.publishConsent.B && !state.publicSlug) {
+      const slug = await this.allocatePublicSlug();
+      const publishedAt = Date.now();
+      state.publicSlug = slug;
+      await this.env.DB.prepare(
+        "UPDATE games SET published_at = ?, public_slug = ?, voting_closes_at = ?, captain_a_notify_email = ?, captain_b_notify_email = ? WHERE id = ?",
+      )
+        .bind(publishedAt, slug, publishedAt + PUBLISH_VOTING_WINDOW_MS, state.notifyEmails.A, state.notifyEmails.B, state.gameId)
+        .run();
+    }
+
+    await this.saveState(state);
+    return ok(toPublicState(state));
+  }
+
   private async persistFinalResultToD1(state: InternalState): Promise<void> {
     const completedAt = Date.now();
     const statements = [
@@ -609,6 +672,15 @@ export class GameRoom extends DurableObject<Env> {
           break;
         }
         this.broadcast({ type: "chat_message", entry: result.state });
+        break;
+      }
+      case "request_publish": {
+        const result = await this.requestPublish(captain, sanitizeNotifyEmail(parsed.notifyEmail));
+        if (!result.ok) {
+          this.sendError(ws, result.code, result.message);
+          break;
+        }
+        this.broadcast({ type: "state_snapshot", state: result.state });
         break;
       }
     }

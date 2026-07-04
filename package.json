@@ -12,7 +12,9 @@
     "deploy": "npm run build && wrangler deploy --env production",
     "db:migrate:local": "wrangler d1 execute fives --local --file=src/db/schema.sql",
     "db:migrate:local:0001": "wrangler d1 execute fives --local --file=src/db/migrations/0001_add_games_created_at_index.sql",
-    "db:migrate:prod:0001": "wrangler d1 execute fives --remote --env production --file=src/db/migrations/0001_add_games_created_at_index.sql"
+    "db:migrate:prod:0001": "wrangler d1 execute fives --remote --env production --file=src/db/migrations/0001_add_games_created_at_index.sql",
+    "db:migrate:local:0002": "wrangler d1 execute fives --local --file=src/db/migrations/0002_add_publish_voting.sql",
+    "db:migrate:prod:0002": "wrangler d1 execute fives --remote --env production --file=src/db/migrations/0002_add_publish_voting.sql"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.0",

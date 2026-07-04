@@ -1322,6 +1322,167 @@ select {
   flex-wrap: wrap;
 }
 
+/* ---------------------------------- public showcase feed ----------------- */
+
+.public-feed {
+  max-width: 28rem;
+  margin: 0 auto;
+}
+
+.public-feed h1 {
+  text-align: center;
+  font-size: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.public-feed__viewport {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.public-feed__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  border: 1px solid var(--pitch-700);
+  background: var(--pitch-900);
+  padding-bottom: 0.9rem;
+}
+
+.public-feed__image {
+  width: 100%;
+  aspect-ratio: 1080 / 1700;
+  object-fit: cover;
+  display: block;
+}
+
+.public-feed__vote-row {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0 0.9rem;
+}
+
+.public-feed__caption {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  padding: 0 0.9rem;
+  text-align: center;
+}
+
+.public-feed__arrow {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  border: 1px solid var(--pitch-700);
+  background: var(--pitch-900);
+  color: var(--floodlight);
+  cursor: pointer;
+  transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.public-feed__arrow:hover:not(:disabled) {
+  border-color: var(--floodlight-dim);
+}
+
+.public-feed__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---------------------------------- comments (public showcase) ---------- */
+
+.comments {
+  max-width: 32rem;
+  margin: 2rem auto 0;
+}
+
+.comments__title {
+  font-size: 1.3rem;
+  margin-bottom: 0.75rem;
+}
+
+.comments__list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.comments__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-chip);
+  background: rgba(244, 240, 228, 0.06);
+}
+
+.comments__author {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--line-chalk-dim);
+}
+
+.comments__text {
+  word-break: break-word;
+}
+
+.comments__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.comments__input {
+  background: var(--pitch-800);
+  border: 1px solid var(--bezel-line);
+  border-radius: var(--radius-chip);
+  padding: 0.5rem 0.7rem;
+  color: var(--line-chalk);
+  font-family: inherit;
+  resize: vertical;
+}
+
+.comments__form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.comments__author-input {
+  flex: 1;
+  min-width: 8rem;
+  background: var(--pitch-800);
+  border: 1px solid var(--bezel-line);
+  border-radius: var(--radius-chip);
+  padding: 0.4rem 0.6rem;
+  color: var(--line-chalk);
+}
+
+.comments__anonymous-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--line-chalk-dim);
+  white-space: nowrap;
+}
+
 /* ---------------------------------- chat (header toggle + modal) -------- */
 
 .matchday-header__chat-slot {

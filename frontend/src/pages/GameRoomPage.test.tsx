@@ -1,13 +1,15 @@
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { GameRoomPage } from "./GameRoomPage";
 import * as sessionLib from "../lib/session";
 import * as useGameSocketHook from "../hooks/useGameSocket";
+import * as gamesApi from "../lib/api/games";
 import type { GameState } from "../../../src/shared/types";
 
 vi.mock("../hooks/useGameSocket");
+vi.mock("../lib/api/games");
 
 const mockedUseGameSocket = vi.mocked(useGameSocketHook.useGameSocket);
 
@@ -24,6 +26,8 @@ const baseState: GameState = {
   squads: { A: [], B: [] },
   lastRoundFirstBidder: null,
   round: null,
+  publishConsent: { A: false, B: false },
+  publicSlug: null,
 };
 
 function renderPage() {
@@ -48,6 +52,7 @@ beforeEach(() => {
     pass: vi.fn(),
     chatMessages: [],
     sendChat: vi.fn(),
+    requestPublish: vi.fn(),
     dismissError: vi.fn(),
   });
 });
@@ -70,6 +75,7 @@ describe("GameRoomPage", () => {
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      requestPublish: vi.fn(),
       dismissError: vi.fn(),
     });
 
@@ -94,6 +100,7 @@ describe("GameRoomPage", () => {
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      requestPublish: vi.fn(),
       dismissError: vi.fn(),
     });
 
@@ -132,6 +139,7 @@ describe("GameRoomPage", () => {
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      requestPublish: vi.fn(),
       dismissError: vi.fn(),
     });
 
@@ -171,6 +179,7 @@ describe("GameRoomPage", () => {
       pass: vi.fn(),
       chatMessages: [],
       sendChat: vi.fn(),
+      requestPublish: vi.fn(),
       dismissError: vi.fn(),
     });
 
@@ -178,5 +187,122 @@ describe("GameRoomPage", () => {
 
     expect(screen.getByText("Alex Keeper")).toBeInTheDocument();
     expect(screen.getAllByText(/total/i).length).toBe(2);
+  });
+
+  it("shows a publish button when completed and not yet published", () => {
+    sessionLib.saveCaptainSession("game-1", "token-a", "A");
+    const requestPublish = vi.fn();
+    mockedUseGameSocket.mockReturnValue({
+      state: { ...baseState, phase: "completed" },
+      error: null,
+      connected: true,
+      proposeNextPlayer: vi.fn(),
+      placeBid: vi.fn(),
+      pass: vi.fn(),
+      chatMessages: [],
+      sendChat: vi.fn(),
+      requestPublish,
+      dismissError: vi.fn(),
+    });
+
+    renderPage();
+
+    const button = screen.getByRole("button", { name: /publish for public voting/i });
+    button.click();
+    expect(requestPublish).toHaveBeenCalledWith(undefined);
+  });
+
+  it("shows a waiting message once my captain has consented but the other hasn't", () => {
+    sessionLib.saveCaptainSession("game-1", "token-a", "A");
+    mockedUseGameSocket.mockReturnValue({
+      state: { ...baseState, phase: "completed", publishConsent: { A: true, B: false } },
+      error: null,
+      connected: true,
+      proposeNextPlayer: vi.fn(),
+      placeBid: vi.fn(),
+      pass: vi.fn(),
+      chatMessages: [],
+      sendChat: vi.fn(),
+      requestPublish: vi.fn(),
+      dismissError: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(screen.getByText(/waiting for .*to agree/i)).toBeInTheDocument();
+  });
+
+  it("shows the public showcase link once both captains have published", () => {
+    sessionLib.saveCaptainSession("game-1", "token-a", "A");
+    mockedUseGameSocket.mockReturnValue({
+      state: {
+        ...baseState,
+        phase: "completed",
+        publishConsent: { A: true, B: true },
+        publicSlug: "swift-otter",
+      },
+      error: null,
+      connected: true,
+      proposeNextPlayer: vi.fn(),
+      placeBid: vi.fn(),
+      pass: vi.fn(),
+      chatMessages: [],
+      sendChat: vi.fn(),
+      requestPublish: vi.fn(),
+      dismissError: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(screen.getByDisplayValue(/\/showcase\/swift-otter$/)).toBeInTheDocument();
+  });
+
+  it("creates a new game and navigates to it when the rematch button is clicked", async () => {
+    sessionLib.saveCaptainSession("game-1", "token-a", "A");
+    vi.mocked(gamesApi.createGame).mockResolvedValue({
+      gameId: "game-2",
+      captainAToken: "token-a2",
+      joinUrlForB: "https://example.com/game/game-2/join?t=token-b2",
+    });
+    mockedUseGameSocket.mockReturnValue({
+      state: { ...baseState, phase: "completed" },
+      error: null,
+      connected: true,
+      proposeNextPlayer: vi.fn(),
+      placeBid: vi.fn(),
+      pass: vi.fn(),
+      chatMessages: [],
+      sendChat: vi.fn(),
+      requestPublish: vi.fn(),
+      dismissError: vi.fn(),
+    });
+
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: /rematch/i }));
+
+    await waitFor(() => expect(gamesApi.createGame).toHaveBeenCalled());
+    await waitFor(() => expect(sessionLib.getCaptainSession("game-2")?.token).toBe("token-a2"));
+  });
+
+  it("shows a rivalry line once this is not the first draft with the same co-captain", () => {
+    sessionLib.saveCaptainSession("game-1", "token-a", "A");
+    mockedUseGameSocket.mockReturnValue({
+      state: { ...baseState, phase: "completed", captainNames: { A: "Sami", B: "Alex" } },
+      error: null,
+      connected: true,
+      proposeNextPlayer: vi.fn(),
+      placeBid: vi.fn(),
+      pass: vi.fn(),
+      chatMessages: [],
+      sendChat: vi.fn(),
+      requestPublish: vi.fn(),
+      dismissError: vi.fn(),
+    });
+    localStorage.setItem("fives:rivalry:alex", JSON.stringify({ played: 2 }));
+
+    renderPage();
+
+    expect(screen.getByText(/draft #3 between you and alex/i)).toBeInTheDocument();
   });
 });

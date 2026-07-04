@@ -72,4 +72,9 @@ export interface GameState {
 
   lastRoundFirstBidder: Captain | null;
   round: RoundState | null;
+
+  /** Which captains have agreed to publish this (completed) game to the public voting page. */
+  publishConsent: Record<Captain, boolean>;
+  /** Set once both captains have consented; the game is then reachable at /showcase/:publicSlug. */
+  publicSlug: string | null;
 }

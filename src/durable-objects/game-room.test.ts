@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll, beforeEach } from "vitest";
 import { env, runInDurableObject } from "cloudflare:test";
 import schema from "../db/schema.sql?raw";
 import { GameRoom, type InitParams, type InitPoolEntry } from "./game-room";
-import { MIN_BID_INCREMENT, STARTING_BUDGET } from "../shared/constants";
+import { MIN_BID_INCREMENT, PUBLISH_VOTING_WINDOW_MS, STARTING_BUDGET } from "../shared/constants";
 import type { Captain, Position } from "../shared/types";
 
 declare module "cloudflare:test" {
@@ -542,6 +542,122 @@ describe("GameRoom.sendChatMessage", () => {
       expect(persisted.chatMessages[0].text).toBe("message 1");
       expect(persisted.chatMessages[199].text).toBe("message 200");
     });
+  });
+});
+
+describe("GameRoom.requestPublish", () => {
+  async function completedStub() {
+    const gameId = `game-publish-${Math.random()}`;
+    const pool = buildPool();
+    await insertPlayersAndGame(gameId, pool);
+
+    const stub = freshStub();
+    await stub.init(makeInitParams({ gameId, pool }));
+    await stub.handleCaptainConnected("A");
+    await stub.handleCaptainConnected("B");
+
+    let finalState = await stub.getState();
+    for (let i = 0; i < 10 && finalState?.phase !== "completed"; i++) {
+      const proposed = await stub.proposeNextPlayer();
+      if (!proposed.ok) throw new Error("expected ok");
+      const firstBidder = proposed.state.round!.firstBidder as Captain;
+      const other = firstBidder === "A" ? "B" : "A";
+      await stub.placeBid(firstBidder, MIN_BID_INCREMENT);
+      const passed = await stub.pass(other);
+      if (!passed.ok) throw new Error("expected ok");
+      finalState = passed.state;
+    }
+
+    return { stub, gameId };
+  }
+
+  it("rejects a publish request before the game is completed", async () => {
+    const stub = freshStub();
+    await stub.init(makeInitParams());
+
+    const result = await stub.requestPublish("A", null);
+    expect(result).toMatchObject({ ok: false, code: "GAME_NOT_COMPLETED" });
+  });
+
+  it("records one captain's consent without publishing", async () => {
+    const { stub } = await completedStub();
+
+    const result = await stub.requestPublish("A", null);
+    if (!result.ok) throw new Error("expected ok");
+
+    expect(result.state.publishConsent).toEqual({ A: true, B: false });
+    expect(result.state.publicSlug).toBeNull();
+  });
+
+  it("publishes once both captains consent, writing published_at/public_slug/voting_closes_at/emails to D1", async () => {
+    const { stub, gameId } = await completedStub();
+
+    await stub.requestPublish("A", "a@example.com");
+    const result = await stub.requestPublish("B", null);
+    if (!result.ok) throw new Error("expected ok");
+
+    expect(result.state.publishConsent).toEqual({ A: true, B: true });
+    expect(result.state.publicSlug).toBeTruthy();
+
+    const row = await env.DB.prepare("SELECT * FROM games WHERE id = ?").bind(gameId).first<{
+      published_at: number | null;
+      public_slug: string | null;
+      voting_closes_at: number | null;
+      captain_a_notify_email: string | null;
+      captain_b_notify_email: string | null;
+    }>();
+    expect(row?.published_at).not.toBeNull();
+    expect(row?.public_slug).toBe(result.state.publicSlug);
+    expect(row?.voting_closes_at).toBe(row!.published_at! + PUBLISH_VOTING_WINDOW_MS);
+    expect(row?.captain_a_notify_email).toBe("a@example.com");
+    expect(row?.captain_b_notify_email).toBeNull();
+  });
+
+  it("is a no-op once already published: the slug does not change and D1 is not rewritten", async () => {
+    const { stub, gameId } = await completedStub();
+
+    await stub.requestPublish("A", null);
+    const first = await stub.requestPublish("B", null);
+    if (!first.ok) throw new Error("expected ok");
+    const firstSlug = first.state.publicSlug;
+
+    const beforeRow = await env.DB.prepare("SELECT published_at FROM games WHERE id = ?").bind(gameId).first<{
+      published_at: number;
+    }>();
+
+    const again = await stub.requestPublish("B", null);
+    if (!again.ok) throw new Error("expected ok");
+    expect(again.state.publicSlug).toBe(firstSlug);
+
+    const afterRow = await env.DB.prepare("SELECT published_at FROM games WHERE id = ?").bind(gameId).first<{
+      published_at: number;
+    }>();
+    expect(afterRow?.published_at).toBe(beforeRow?.published_at);
+  });
+
+  it("via WebSocket: a request_publish message broadcasts a state_snapshot reflecting the sender's consent", async () => {
+    const { stub } = await completedStub();
+
+    const resp = await stub.fetch("https://example.com/ws?token=token-a", {
+      headers: { Upgrade: "websocket" },
+    });
+    const client = resp.webSocket!;
+    client.accept();
+
+    const messages: unknown[] = [];
+    const gotSnapshotAfterPublish = new Promise<void>((resolve) => {
+      client.addEventListener("message", (event: MessageEvent) => {
+        const msg = JSON.parse(event.data as string) as { type: string; state?: { publishConsent: Record<string, boolean> } };
+        messages.push(msg);
+        if (msg.type === "state_snapshot" && msg.state?.publishConsent.A) resolve();
+      });
+    });
+
+    client.send(JSON.stringify({ type: "request_publish", notifyEmail: "a@example.com" }));
+    await gotSnapshotAfterPublish;
+
+    const state = await stub.getState();
+    expect(state?.publishConsent).toEqual({ A: true, B: false });
   });
 });
 

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Copy, Check, ShareNetwork } from "@phosphor-icons/react";
-import { getCaptainSession } from "../lib/session";
+import { getCaptainSession, saveCaptainSession } from "../lib/session";
 import { useGameSocket } from "../hooks/useGameSocket";
 import { computeMaxLegalBid } from "../../../src/shared/rules";
 import { PlayerCard } from "../components/PlayerCard";
@@ -12,12 +12,19 @@ import { SquadPanel } from "../components/SquadPanel";
 import { ResultsTable } from "../components/ResultsTable";
 import { ChatModal } from "../components/ChatModal";
 import { shareOrDownloadImage } from "../lib/shareImage";
+import { createGame } from "../lib/api/games";
+import { recordGamePlayedOnce } from "../lib/rivalry";
 import type { Captain, SquadEntry } from "../../../src/shared/types";
 
 export function GameRoomPage() {
   const { gameId } = useParams<{ gameId: string }>();
   const session = gameId ? getCaptainSession(gameId) : null;
+  const navigate = useNavigate();
   const [linkCopied, setLinkCopied] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [rematchLoading, setRematchLoading] = useState(false);
+  const [rematchError, setRematchError] = useState<string | null>(null);
+  const [rivalryPlayed, setRivalryPlayed] = useState(0);
 
   async function copyJoinLink(url: string) {
     await navigator.clipboard.writeText(url);
@@ -40,7 +47,18 @@ export function GameRoomPage() {
   // Hooks must run unconditionally; useGameSocket no-ops (stays disconnected)
   // when gameId/token are null, which is the case whenever there's no valid
   // session for this game.
-  const { state, error, chatMessages, connected, placeBid, pass, proposeNextPlayer, sendChat, dismissError } = useGameSocket(
+  const {
+    state,
+    error,
+    chatMessages,
+    connected,
+    placeBid,
+    pass,
+    proposeNextPlayer,
+    sendChat,
+    requestPublish,
+    dismissError,
+  } = useGameSocket(
     session && gameId ? gameId : null,
     session ? session.token : null,
     session?.name ?? null,
@@ -51,6 +69,27 @@ export function GameRoomPage() {
       proposeNextPlayer();
     }
   }, [state?.phase, state?.round, proposeNextPlayer]);
+
+  useEffect(() => {
+    if (!gameId || !session || state?.phase !== "completed") return;
+    const opponent: Captain = session.role === "A" ? "B" : "A";
+    const rivalry = recordGamePlayedOnce(gameId, state.captainNames[opponent]);
+    setRivalryPlayed(rivalry.played);
+  }, [gameId, session?.role, state?.phase, state?.captainNames]);
+
+  async function handleRematch() {
+    if (!session) return;
+    setRematchLoading(true);
+    setRematchError(null);
+    try {
+      const result = await createGame();
+      saveCaptainSession(result.gameId, result.captainAToken, "A", result.joinUrlForB, session.name);
+      navigate(`/game/${result.gameId}`);
+    } catch (err) {
+      setRematchError(err instanceof Error ? err.message : String(err));
+      setRematchLoading(false);
+    }
+  }
 
   if (!gameId || !session) {
     return (
@@ -128,6 +167,12 @@ export function GameRoomPage() {
       <div className="fulltime">
         <span className="fulltime__eyebrow">Full time</span>
         <h1>Final squads</h1>
+        {rivalryPlayed > 1 && (
+          <p className="status-line">
+            This is draft #{rivalryPlayed} between you and{" "}
+            {state.captainNames[myCaptain === "A" ? "B" : "A"] ?? "your co-captain"}.
+          </p>
+        )}
         <ResultsTable squads={state.squads} captainNames={state.captainNames} />
         <div className="fulltime__share-row">
           <button
@@ -156,7 +201,76 @@ export function GameRoomPage() {
           >
             <ShareNetwork weight="bold" /> Share matchup
           </button>
+          <button
+            type="button"
+            className="btn btn--primary"
+            disabled={rematchLoading}
+            onClick={() => void handleRematch()}
+          >
+            {rematchLoading ? "Setting up rematch..." : "Rematch"}
+          </button>
         </div>
+        {rematchError && (
+          <p className="alert" role="alert">
+            {rematchError}
+          </p>
+        )}
+
+        {state.publicSlug ? (
+          <div className="lobby-card__link-row">
+            <label htmlFor="public-showcase-link">Public showcase link</label>
+            <div className="lobby-card__link-input-row">
+              <input
+                readOnly
+                id="public-showcase-link"
+                aria-label="Public showcase link"
+                value={`${window.location.origin}/showcase/${state.publicSlug}`}
+              />
+              <button
+                className="btn btn--icon"
+                type="button"
+                aria-label={linkCopied ? "Link copied" : "Copy link"}
+                title={linkCopied ? "Copied!" : "Copy link"}
+                onClick={() => void copyJoinLink(`${window.location.origin}/showcase/${state.publicSlug}`)}
+              >
+                {linkCopied ? <Check weight="bold" /> : <Copy weight="bold" />}
+              </button>
+              <button
+                className="btn btn--icon lobby-card__share-btn"
+                type="button"
+                aria-label="Share link"
+                title="Share link"
+                onClick={() => void shareJoinLink(`${window.location.origin}/showcase/${state.publicSlug}`)}
+              >
+                <ShareNetwork weight="bold" />
+              </button>
+            </div>
+          </div>
+        ) : state.publishConsent[myCaptain] ? (
+          <p className="status-line">
+            Waiting for {state.captainNames[myCaptain === "A" ? "B" : "A"] ?? `Captain ${myCaptain === "A" ? "B" : "A"}`} to agree...
+          </p>
+        ) : (
+          <div className="lobby-card__link-row">
+            <label htmlFor="notify-email">Notify me when voting closes (optional)</label>
+            <div className="lobby-card__link-input-row">
+              <input
+                id="notify-email"
+                type="email"
+                placeholder="you@example.com"
+                value={notifyEmail}
+                onChange={(e) => setNotifyEmail(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => requestPublish(notifyEmail.trim() || undefined)}
+              >
+                Publish for public voting
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

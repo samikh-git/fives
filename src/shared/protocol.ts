@@ -24,12 +24,18 @@ export interface SendChatMessage {
   text: string;
 }
 
+export interface RequestPublishMessage {
+  type: "request_publish";
+  notifyEmail?: string;
+}
+
 export type ClientMessage =
   | JoinMessage
   | ProposeNextPlayerMessage
   | PlaceBidMessage
   | PassMessage
-  | SendChatMessage;
+  | SendChatMessage
+  | RequestPublishMessage;
 
 /**
  * Fixed-string heartbeat payloads matched by the DO's `setWebSocketAutoResponse`
@@ -113,7 +119,8 @@ export type ErrorCode =
   | "NO_ACTIVE_ROUND"
   | "INVALID_TOKEN"
   | "EMPTY_CHAT_MESSAGE"
-  | "INAPPROPRIATE_CHAT_MESSAGE";
+  | "INAPPROPRIATE_CHAT_MESSAGE"
+  | "GAME_NOT_COMPLETED";
 
 export interface ErrorMessage {
   type: "error";

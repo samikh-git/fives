@@ -12,6 +12,7 @@ export interface UseGameSocketResult {
   placeBid: (amount: number) => void;
   pass: () => void;
   sendChat: (text: string) => void;
+  requestPublish: (notifyEmail?: string) => void;
   dismissError: () => void;
 }
 
@@ -180,6 +181,10 @@ export function useGameSocket(
   );
   const pass = useCallback(() => send({ type: "pass" }), [send]);
   const sendChat = useCallback((text: string) => send({ type: "send_chat", text }), [send]);
+  const requestPublish = useCallback(
+    (notifyEmail?: string) => send({ type: "request_publish", notifyEmail }),
+    [send],
+  );
   const dismissError = useCallback(() => setError(null), []);
 
   return {
@@ -191,6 +196,7 @@ export function useGameSocket(
     placeBid,
     pass,
     sendChat,
+    requestPublish,
     dismissError,
   };
 }
