@@ -1,0 +1,44 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fives",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-03-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_BASE_URL": "http://localhost:8787"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "GAME_ROOM", "class_name": "GameRoom" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fives",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PLAYER_IMAGES",
+      "bucket_name": "fives-player-images"
+    }
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "env": {
+    "production": {
+      "vars": {
+        // Replace with the real deployed domain.
+        "APP_BASE_URL": "https://fives.sami-houssaini.workers.dev"
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "fives",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build && wrangler dev",
+    "build": "vite build --config frontend/vite.config.ts",
+    "test": "vitest run --config vitest.config.ts && vitest run --config vitest.workers.config.ts",
+    "test:unit": "vitest --config vitest.config.ts",
+    "test:workers": "vitest --config vitest.workers.config.ts",
+    "deploy": "npm run build && wrangler deploy --env production",
+    "db:migrate:local": "wrangler d1 execute fives --local --file=src/db/schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20250327.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "hono": "^4.6.20",
+    "jsdom": "^25.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.2.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7",
+    "wrangler": "^4.7.0"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "obscenity": "^0.4.6",
+    "striptags": "^3.2.0"
+  }
+}
