@@ -1,0 +1,1 @@
+Make pass automatic when the bid is higher than your budget
